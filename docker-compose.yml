@@ -1,0 +1,55 @@
+services:
+  uptime:
+    build: .
+    image: uptime-status:local
+    container_name: uptime-status
+    restart: unless-stopped
+    # Bound to localhost only: put a TLS-terminating reverse proxy in front (see README).
+    ports:
+      - "127.0.0.1:${UPTIME_PORT:-8000}:8000"
+    environment:
+      UPTIME_COOKIE_SECURE: ${UPTIME_COOKIE_SECURE:-true}
+      UPTIME_ALLOWED_HOSTS: ${UPTIME_ALLOWED_HOSTS:-}
+      # Requests to the published port arrive from this network's gateway, which is
+      # where a reverse proxy on the host connects from. Trust its X-Forwarded-For.
+      UPTIME_FORWARDED_ALLOW_IPS: ${UPTIME_FORWARDED_ALLOW_IPS:-172.30.0.1}
+      UPTIME_ALLOW_PRIVATE_TARGETS: ${UPTIME_ALLOW_PRIVATE_TARGETS:-false}
+      UPTIME_SESSION_TTL_HOURS: ${UPTIME_SESSION_TTL_HOURS:-12}
+      UPTIME_RAW_RETENTION_DAYS: ${UPTIME_RAW_RETENTION_DAYS:-30}
+      UPTIME_PUBLIC_REFRESH_SECONDS: ${UPTIME_PUBLIC_REFRESH_SECONDS:-30}
+      UPTIME_CHECK_CONCURRENCY: ${UPTIME_CHECK_CONCURRENCY:-10}
+      UPTIME_ALLOWED_PORTS: ${UPTIME_ALLOWED_PORTS:-80,443,8080,8443}
+    volumes:
+      - uptime-data:/data
+      - type: bind
+        source: ./config/admin.toml
+        target: /config/admin.toml
+        read_only: true
+        bind:
+          create_host_path: false
+    # Hardening
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    # Fixed subnet so the gateway address above is predictable.
+    ipam:
+      config:
+        - subnet: ${UPTIME_SUBNET:-172.30.0.0/24}
+
+volumes:
+  uptime-data:

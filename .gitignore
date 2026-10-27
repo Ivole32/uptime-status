@@ -1,0 +1,17 @@
+# Secrets & local config
+config/admin.toml
+.env
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

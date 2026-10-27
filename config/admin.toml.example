@@ -1,0 +1,11 @@
+# Admin credentials for /admin.
+#
+# 1. Copy this file to config/admin.toml
+# 2. Generate a hash:   python -m app.cli hash-password
+#    (or with Docker:   docker compose build && docker run --rm -it uptime-status:local python -m app.cli hash-password)
+# 3. Paste the printed password_hash line below and choose a username.
+#
+# Changes are picked up automatically; changing either value signs out all sessions.
+
+username = "admin"
+password_hash = "$scrypt$ln=15,r=8,p=1$REPLACE_ME$REPLACE_ME"

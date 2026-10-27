@@ -1,0 +1,173 @@
+"""Authenticated admin API. Every route requires a session (and CSRF token for writes)."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ..auth import require_admin
+from ..config import Settings, get_settings
+from ..db import get_db
+from ..models import Check, Incident, Monitor, SiteSetting
+from ..schemas import CheckOut, IncidentOut, MonitorIn, MonitorOut, SiteSettingsIn
+from ..stats import get_site_settings, status_cache
+
+router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
+
+# Bounded so oversized IDs are a 422, not an integer overflow in the database driver.
+ObjectId = Annotated[int, Path(ge=1, le=2**31 - 1)]
+
+
+def _no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "no-store"
+
+
+def _get_monitor(db: Session, monitor_id: int) -> Monitor:
+    monitor = db.get(Monitor, monitor_id)
+    if monitor is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Monitor not found")
+    return monitor
+
+
+def _changed(request: Request) -> None:
+    status_cache.invalidate()
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is not None:
+        scheduler.wake()
+
+
+@router.get("/monitors", response_model=list[MonitorOut])
+def list_monitors(response: Response, db: Session = Depends(get_db)) -> list[Monitor]:
+    _no_store(response)
+    return list(db.scalars(select(Monitor).order_by(Monitor.sort_order, Monitor.name, Monitor.id)))
+
+
+@router.post("/monitors", response_model=MonitorOut, status_code=status.HTTP_201_CREATED)
+def create_monitor(
+    body: MonitorIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Monitor:
+    if db.scalar(select(func.count()).select_from(Monitor)) >= settings.max_monitors:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Monitor limit ({settings.max_monitors}) reached")
+    monitor = Monitor(**body.model_dump())
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+    _changed(request)
+    return monitor
+
+
+@router.put("/monitors/{monitor_id}", response_model=MonitorOut)
+def update_monitor(
+    monitor_id: ObjectId, body: MonitorIn, request: Request, db: Session = Depends(get_db)
+) -> Monitor:
+    monitor = _get_monitor(db, monitor_id)
+    data = body.model_dump()
+    if data["url"] != monitor.url:
+        monitor.status = "pending"
+        monitor.last_checked_at = None
+    for key, value in data.items():
+        setattr(monitor, key, value)
+    db.commit()
+    db.refresh(monitor)
+    _changed(request)
+    return monitor
+
+
+@router.delete("/monitors/{monitor_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_monitor(monitor_id: ObjectId, request: Request, db: Session = Depends(get_db)) -> Response:
+    db.delete(_get_monitor(db, monitor_id))
+    db.commit()
+    _changed(request)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/monitors/{monitor_id}/check", status_code=status.HTTP_202_ACCEPTED)
+def check_now(monitor_id: ObjectId, request: Request, db: Session = Depends(get_db)) -> dict:
+    monitor = _get_monitor(db, monitor_id)
+    if not monitor.enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Monitor is paused")
+    monitor.last_checked_at = None
+    db.commit()
+    _changed(request)
+    return {"queued": True}
+
+
+@router.get("/monitors/{monitor_id}/checks", response_model=list[CheckOut])
+def recent_checks(
+    monitor_id: ObjectId,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list[Check]:
+    _no_store(response)
+    _get_monitor(db, monitor_id)
+    return list(
+        db.scalars(
+            select(Check)
+            .where(Check.monitor_id == monitor_id)
+            .order_by(Check.checked_at.desc())
+            .limit(limit)
+        )
+    )
+
+
+@router.get("/incidents", response_model=list[IncidentOut])
+def list_incidents(
+    response: Response,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    _no_store(response)
+    rows = db.execute(
+        select(Incident, Monitor.name)
+        .join(Monitor, Monitor.id == Incident.monitor_id)
+        .order_by(Incident.started_at.desc())
+        .limit(limit)
+    )
+    return [
+        {
+            "id": inc.id,
+            "monitor_id": inc.monitor_id,
+            "monitor_name": name,
+            "started_at": inc.started_at,
+            "resolved_at": inc.resolved_at,
+            "error": inc.error,
+        }
+        for inc, name in rows
+    ]
+
+
+@router.delete("/incidents/{incident_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_incident(incident_id: ObjectId, db: Session = Depends(get_db)) -> Response:
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
+    db.delete(incident)
+    db.commit()
+    status_cache.invalidate()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/settings")
+def read_settings(response: Response, db: Session = Depends(get_db)) -> dict:
+    _no_store(response)
+    return get_site_settings(db)
+
+
+@router.put("/settings")
+def write_settings(body: SiteSettingsIn, db: Session = Depends(get_db)) -> dict:
+    for key, value in body.model_dump().items():
+        row = db.get(SiteSetting, key)
+        if row is None:
+            db.add(SiteSetting(key=key, value=value or ""))
+        else:
+            row.value = value or ""
+    db.commit()
+    status_cache.invalidate()
+    return get_site_settings(db)

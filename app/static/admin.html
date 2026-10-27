@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin · Status</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="/static/js/theme.js"></script>
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/admin.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/admin"><span class="brand-mark" aria-hidden="true"></span><span>Admin</span></a>
+      <nav class="nav" aria-label="Admin">
+        <a href="/">Status page</a>
+        <button class="link-btn" id="logout-btn" type="button" hidden>Sign out</button>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"></button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Login -->
+  <main id="login-view" class="login-wrap" hidden>
+    <form id="login-form" class="card login-card" autocomplete="on" novalidate>
+      <div>
+        <h1>Sign in</h1>
+        <p class="muted small">Administrator access to the status page.</p>
+      </div>
+      <label class="field"><span>Username</span>
+        <input name="username" autocomplete="username" required maxlength="64" autocapitalize="none" spellcheck="false">
+      </label>
+      <label class="field"><span>Password</span>
+        <input name="password" type="password" autocomplete="current-password" required maxlength="1024">
+      </label>
+      <p class="error-box" id="login-error" role="alert" hidden></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </main>
+
+  <!-- Dashboard -->
+  <main id="app-view" class="container" hidden>
+    <section class="hero">
+      <p class="hero-label s-operational">Dashboard</p>
+      <h1>Monitors</h1>
+      <p class="hero-desc">Add the domains you want to watch. Each one is requested on its own interval and its response time is recorded.</p>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div><h2>Monitors</h2><p class="muted" id="monitor-count"></p></div>
+        <button class="btn primary" id="add-btn" type="button">+ Add monitor</button>
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Service</th><th>Status</th><th>Interval</th><th>Last check</th><th>Response</th><th><span hidden>Actions</span></th></tr></thead>
+          <tbody id="monitor-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><div><h2>Incidents</h2><p class="muted">Recorded automatically when a service goes down. Delete false alarms here.</p></div></div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Service</th><th>Started</th><th>Duration</th><th>Reason</th><th><span hidden>Actions</span></th></tr></thead>
+          <tbody id="incident-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><div><h2>Page settings</h2><p class="muted">Shown at the top of the public status page.</p></div></div>
+      <form id="settings-form" class="card settings-card" novalidate>
+        <div class="form-grid">
+          <label class="field full"><span>Title</span><input name="title" required maxlength="80"></label>
+          <label class="field full"><span>Description</span><textarea name="description" maxlength="300" rows="2"></textarea></label>
+        </div>
+        <p class="error-box" id="settings-error" role="alert" hidden></p>
+        <div class="form-actions"><button class="btn primary" type="submit">Save settings</button></div>
+      </form>
+    </section>
+  </main>
+
+  <!-- Monitor editor -->
+  <dialog id="monitor-dialog" aria-labelledby="monitor-dialog-title">
+    <form id="monitor-form" class="dialog-body" novalidate>
+      <h2 id="monitor-dialog-title">Add monitor</h2>
+      <div class="form-grid">
+        <label class="field"><span>Name</span><input name="name" required maxlength="100" placeholder="My website"></label>
+        <label class="field"><span>Domain or URL</span><input name="url" required maxlength="2048" placeholder="example.com" autocapitalize="none" spellcheck="false" inputmode="url"></label>
+        <label class="field full"><span>Description</span><input name="description" maxlength="500" placeholder="Optional, shown on the status page"></label>
+        <label class="field"><span>Check interval (seconds)</span><input name="interval_seconds" type="number" min="10" max="86400" step="1" required value="60"><small>10 s to 24 h</small></label>
+        <label class="field"><span>Timeout (seconds)</span><input name="timeout_seconds" type="number" min="1" max="60" step="1" required value="10"><small>Must be shorter than the interval</small></label>
+        <label class="field"><span>Sort order</span><input name="sort_order" type="number" min="-10000" max="10000" step="1" value="0"><small>Lower numbers are shown first</small></label>
+        <div class="field full">
+          <span>Options</span>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="enabled" checked> Active</label>
+            <label class="check"><input type="checkbox" name="is_public" checked> Show on status page</label>
+            <label class="check"><input type="checkbox" name="show_url"> Show link publicly</label>
+          </div>
+        </div>
+      </div>
+      <p class="error-box" id="monitor-error" role="alert" hidden></p>
+      <div class="recent" id="recent-checks" hidden>
+        <h3>Recent checks</h3>
+        <div class="recent-list" id="recent-list"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn" type="button" id="monitor-cancel">Cancel</button>
+        <button class="btn primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirmation -->
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <div class="dialog-body">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p class="muted" id="confirm-text"></p>
+      <div class="form-actions">
+        <button class="btn" type="button" id="confirm-cancel">Cancel</button>
+        <button class="btn danger solid" type="button" id="confirm-ok">Delete</button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>
