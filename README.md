@@ -44,7 +44,7 @@ cp config/admin.toml.example config/admin.toml
 Put your username and the printed `password_hash` line into `config/admin.toml`:
 
 ```toml
-username = "ivo"
+username = "admin"
 password_hash = "$scrypt$ln=15,r=8,p=1$...$..."
 ```
 
