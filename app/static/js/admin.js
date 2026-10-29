@@ -113,6 +113,7 @@
   function statusBadge(m) {
     if (!m.enabled) return h("span", { class: "badge paused", text: "Paused" });
     if (m.status === "up") return h("span", { class: "badge up", text: "Up" });
+    if (m.status === "degraded") return h("span", { class: "badge degraded", text: "Degraded" });
     if (m.status === "down") return h("span", { class: "badge down", text: "Down", title: m.last_error || "" });
     return h("span", { class: "badge", text: "Pending" });
   }
@@ -260,7 +261,7 @@
       }
       body.replaceChildren(...incidents.map((inc) =>
         h("tr", {},
-          h("td", {}, h("strong", { text: inc.monitor_name }), inc.resolved_at ? null : h("span", { class: "badge down", text: "Ongoing" })),
+          h("td", {}, h("strong", { text: inc.monitor_name }), inc.resolved_at ? null : h("span", { class: "badge " + (inc.kind === "degraded" ? "degraded" : "down"), text: "Ongoing" })),
           h("td", { text: fmtDateTime(inc.started_at) }),
           h("td", { text: fmtDuration(inc.started_at, inc.resolved_at) }),
           h("td", { text: inc.error || "—" }),

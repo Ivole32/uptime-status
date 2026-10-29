@@ -7,12 +7,29 @@
 
   const HERO = {
     operational: ["Operational", "Everything works"],
+    degraded_performance: ["Degraded performance", "Some services are slower than usual"],
     partial_outage: ["Partial outage", "Some services are down"],
     major_outage: ["Major outage", "All services are down"],
     unknown: ["Waiting", "Waiting for the first checks"],
     empty: ["No services", "Nothing is monitored yet"],
   };
-  const STATUS_TEXT = { up: "Operational", down: "Down", pending: "Pending", unknown: "No recent data" };
+  const STATUS_TEXT = { up: "Operational", degraded: "Elevated latency", down: "Down", pending: "Pending", unknown: "No recent data" };
+
+  // Day colour comes from the server: red for any outage, yellow if slow more often than normal.
+  const DAY_CLASS = { up: "up", degraded: "warn", down: "down" };
+  const DAY_TEXT = { up: "Operational", degraded: "Mostly elevated latency", down: "Outage" };
+  const plural = (n, word) => n + " " + word + (n === 1 ? "" : "s");
+
+  function dayLines(d) {
+    const lines = [fmtDay(d.date)];
+    if (d.uptime === null) return [...lines, "No data"];
+    lines.push(DAY_TEXT[d.state], fmtPct(d.uptime, 3) + " uptime");
+    if (d.avg_ms !== null && d.avg_ms !== undefined) lines.push("Avg response " + fmtMs(d.avg_ms));
+    if (d.down_checks) lines.push(plural(d.down_checks, "failed check"));
+    if (d.degraded_checks) lines.push(plural(d.degraded_checks, "slow check") + " (elevated latency)");
+    return lines;
+  }
+  const dayClass = (d) => "s-" + (DAY_CLASS[d.state] || "none");
 
   let data = null;
   let monthOffset = 0; // 0 = current month, -1 = previous, ...
@@ -69,7 +86,7 @@
     const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1));
     const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
     const todayIso = now.toISOString().slice(0, 10);
-    const byDay = new Map(data.overall_days.map((d) => [d.date, d.uptime]));
+    const byDay = new Map(data.overall_days.map((d) => [d.date, d]));
 
     const grid = $("month-grid");
     grid.style.gridTemplateColumns = "repeat(" + daysInMonth + ", minmax(0, 1fr))";
@@ -77,11 +94,11 @@
     const values = [];
     for (let day = 1; day <= daysInMonth; day++) {
       const iso = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), day)).toISOString().slice(0, 10);
-      const uptime = byDay.has(iso) ? byDay.get(iso) : null;
-      if (uptime !== null) values.push(uptime);
+      const d = byDay.get(iso) || { date: iso, uptime: null };
+      if (d.uptime !== null) values.push(d.uptime);
       const future = iso > todayIso;
-      const cell = h("div", { class: "day-cell s-" + (future ? "none" : level(uptime)) });
-      withTip(cell, [fmtDay(iso), future ? "Upcoming" : uptime === null ? "No data" : fmtPct(uptime, 3) + " uptime"]);
+      const cell = h("div", { class: "day-cell " + (future ? "s-none" : dayClass(d)) });
+      withTip(cell, future ? [fmtDay(iso), "Upcoming"] : dayLines(d));
       cells.push(cell);
     }
     grid.replaceChildren(...cells);
@@ -114,16 +131,7 @@
 
   function monitorRow(m) {
     const lvl = m.status === "down" ? "down" : level(m.uptime["90d"]);
-    const bars = m.days.map((d) => {
-      const lines = [fmtDay(d.date)];
-      if (d.uptime === null) lines.push("No data");
-      else {
-        lines.push(fmtPct(d.uptime, 3) + " uptime");
-        if (d.avg_ms !== null) lines.push("Avg response " + fmtMs(d.avg_ms));
-        if (d.down_checks) lines.push(d.down_checks + " failed check" + (d.down_checks === 1 ? "" : "s"));
-      }
-      return withTip(h("span", { class: "bar s-" + level(d.uptime) }), lines);
-    });
+    const bars = m.days.map((d) => withTip(h("span", { class: "bar " + dayClass(d) }), dayLines(d)));
 
     let link = null;
     if (m.url) {
@@ -181,13 +189,15 @@
 
   // ---------- Incidents ----------
   function incidentCard(inc, active) {
+    const slow = inc.kind === "degraded";
     const meta = active
-      ? "Down since " + fmtDateTime(inc.started_at) + " · " + fmtDuration(inc.started_at, null)
+      ? (slow ? "Slow since " : "Down since ") + fmtDateTime(inc.started_at) + " · " + fmtDuration(inc.started_at, null)
       : fmtDateTime(inc.started_at) + " – " + fmtTime(inc.resolved_at) + " · " + fmtDuration(inc.started_at, inc.resolved_at);
-    return h("div", { class: "card incident" + (active ? " active" : "") },
+    const title = slow ? (active ? " has elevated latency" : " had elevated latency") : (active ? " is down" : " was down");
+    return h("div", { class: "card incident" + (active ? " active" : "") + (slow ? " degraded" : "") },
       h("div", { class: "incident-top" },
-        h("span", { class: "incident-title", text: inc.monitor_name + (active ? " is down" : " was down") }),
-        h("span", { class: "badge " + (active ? "down" : "up"), text: active ? "Ongoing" : "Resolved" })),
+        h("span", { class: "incident-title", text: inc.monitor_name + title }),
+        h("span", { class: "badge " + (active ? (slow ? "degraded" : "down") : "up"), text: active ? "Ongoing" : "Resolved" })),
       h("p", { class: "incident-meta", text: meta + (inc.error ? " · " + inc.error : "") }));
   }
 

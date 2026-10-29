@@ -78,6 +78,9 @@ class DailyStat(Base):
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     total_checks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     up_checks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Up checks made while the monitor was degraded (elevated latency).
+    degraded_checks: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    degraded_ms_sum: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     response_ms_sum: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     response_ms_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -92,6 +95,8 @@ class Incident(Base):
     )
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    # "down" (checks fail) or "degraded" (checks pass, but much slower than usual).
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="down", server_default="down")
     error: Mapped[str | None] = mapped_column(String(200))
 
 

@@ -89,12 +89,14 @@ p { margin: 0; }
 .hero { padding: 56px 0 36px; }
 .hero-label { font-weight: 600; font-size: 0.95rem; margin-bottom: 8px; color: var(--faint); }
 .hero-label.s-operational { color: var(--up); }
+.hero-label.s-degraded_performance,
 .hero-label.s-partial_outage { color: var(--warn); }
 .hero-label.s-major_outage { color: var(--down); }
 .hero h1 { font-size: clamp(2rem, 6vw, 3.1rem); font-weight: 750; letter-spacing: -0.025em; }
 .hero-desc { margin-top: 12px; color: var(--muted); max-width: 60ch; }
 .hero-meta { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 0.9rem; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 0 var(--up-soft); animation: pulse 2s infinite; }
+.pulse.s-degraded_performance,
 .pulse.s-partial_outage { background: var(--warn); }
 .pulse.s-major_outage { background: var(--down); }
 .pulse.s-unknown { background: var(--faint); animation: none; }
@@ -147,6 +149,7 @@ textarea { resize: vertical; min-height: 70px; }
 .monitor-title h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--faint); }
 .status-dot.up { background: var(--up); box-shadow: 0 0 0 3px var(--up-soft); }
+.status-dot.degraded { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 .status-dot.down { background: var(--down); box-shadow: 0 0 0 3px var(--down-soft); }
 .monitor-uptime { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--faint); }
 .monitor-uptime.up { color: var(--up); }
@@ -167,6 +170,7 @@ textarea { resize: vertical; min-height: 70px; }
 .badge { display: inline-block; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
 .badge.up { background: var(--up-soft); color: var(--up); }
 .badge.down { background: var(--down-soft); color: var(--down); }
+.badge.degraded,
 .badge.paused { background: var(--warn-soft); color: var(--warn); }
 
 .empty { padding: 28px 22px; text-align: center; color: var(--muted); }
@@ -176,6 +180,7 @@ textarea { resize: vertical; min-height: 70px; }
 .incident-group h3 { font-size: 0.9rem; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
 .incident { padding: 16px 20px; border-left: 3px solid var(--up); }
 .incident.active { border-left-color: var(--down); }
+.incident.active.degraded { border-left-color: var(--warn); }
 .incident-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .incident-title { font-weight: 600; }
 .incident-meta { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }

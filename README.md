@@ -176,6 +176,8 @@ All settings are environment variables (see `.env.example`):
 | `UPTIME_PUBLIC_CACHE_SECONDS` | `10` | Server-side cache of the public status payload. |
 | `UPTIME_CHECK_CONCURRENCY` | `10` | Maximum checks running at once; further due checks wait in a queue. Keep it at **25 or lower** with the compose `pids_limit: 128` (see below). |
 | `UPTIME_CHECK_RETRIES` | `1` | Immediate retries before a check counts as failed. |
+| `UPTIME_DEGRADED_FACTOR` | `2` | A check is slow above this multiple of the usual response time. `0` turns latency alerts off. |
+| `UPTIME_DEGRADED_MIN_MS` | `200` | A check is only slow if it is also at least this many ms above the usual response time. |
 | `UPTIME_MAX_MONITORS` | `200` | Upper limit on monitors. |
 | `UPTIME_LOGIN_MAX_ATTEMPTS` | `5` | Failed logins per IP per window. |
 | `UPTIME_LOGIN_WINDOW_MINUTES` | `15` | Rate-limit window. |
@@ -190,6 +192,14 @@ All settings are environment variables (see `.env.example`):
 - **Response time** is the time from opening the connection until the response headers
   arrive, including the TLS handshake and redirects.
 - When a monitor goes down an incident is opened, and it is resolved on the next successful check.
+- **Elevated latency:** the usual response time is the 7-day average of successful checks, not
+  counting checks made while degraded. When the last 3 checks are all slower than
+  `UPTIME_DEGRADED_FACTOR` × usual *and* at least `UPTIME_DEGRADED_MIN_MS` above it, the monitor
+  shows as **degraded** (yellow) and an "Elevated latency" incident is opened. It is resolved on the next normal check. Degraded
+  checks still count as up. Nothing is flagged until a monitor has at least 20 successful checks.
+- **Daily bars** (per service and in the monthly overview) are red if the day had any failed check,
+  yellow if more checks were degraded than normal, and green otherwise. Hover a bar for the
+  uptime, average response time and the number of failed and slow checks.
 - If checks stop arriving for a monitor (more than two intervals), the public page shows
   "No recent data" instead of a stale status.
 - The public page shows coarse error reasons only (for example `HTTP 503`, `DNS resolution failed`,

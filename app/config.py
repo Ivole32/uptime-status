@@ -29,6 +29,13 @@ def _int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+def _float(name: str, default: float, minimum: float, maximum: float) -> float:
+    value = float(_env(name, str(default)))
+    if not minimum <= value <= maximum:
+        raise ValueError(f"UPTIME_{name} must be between {minimum} and {maximum}")
+    return value
+
+
 def _list(name: str) -> list[str]:
     return [item.strip() for item in _env(name, "").split(",") if item.strip()]
 
@@ -69,6 +76,8 @@ class Settings:
     max_monitors: int = 200
     public_cache_seconds: int = 10
     public_refresh_seconds: int = 30
+    degraded_factor: float = 2.0
+    degraded_min_ms: int = 200
     login_max_attempts: int = 5
     login_window_minutes: int = 15
     enable_api_docs: bool = False
@@ -97,6 +106,8 @@ def get_settings() -> Settings:
         max_monitors=_int("MAX_MONITORS", 200, 1, 10000),
         public_cache_seconds=_int("PUBLIC_CACHE_SECONDS", 10, 0, 300),
         public_refresh_seconds=_int("PUBLIC_REFRESH_SECONDS", 30, 5, 3600),
+        degraded_factor=_float("DEGRADED_FACTOR", 2.0, 0.0, 100.0),
+        degraded_min_ms=_int("DEGRADED_MIN_MS", 200, 0, 600_000),
         login_max_attempts=_int("LOGIN_MAX_ATTEMPTS", 5, 1, 100),
         login_window_minutes=_int("LOGIN_WINDOW_MINUTES", 15, 1, 1440),
         enable_api_docs=_bool("ENABLE_API_DOCS", False),

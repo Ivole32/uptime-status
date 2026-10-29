@@ -8,7 +8,7 @@ from app.checker import ProbeResult
 from app.config import get_settings
 from app.db import SessionLocal, utcnow
 from app.main import app
-from app.models import AdminSession, Incident, Monitor
+from app.models import AdminSession, DailyStat, Incident, Monitor
 from app.scheduler import record_result
 
 from .conftest import CREDENTIALS_FILE, PASSWORD, USERNAME, write_credentials
@@ -304,6 +304,118 @@ def test_stale_monitor_reported_unknown(admin):
     body = admin.get("/api/status").json()
     assert body["monitors"][0]["status"] == "unknown"
     assert body["overall_status"] == "unknown"
+
+
+def _record_ms(mid, *times):
+    for ms in times:
+        record_result(mid, ProbeResult(True, ms, 200, None))
+
+
+def test_elevated_latency_marks_monitor_degraded(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    _record_ms(mid, *[100] * 20)
+    _record_ms(mid, 1000, 1000)  # two slow checks are not enough yet
+    assert admin.get("/api/status").json()["monitors"][0]["status"] == "up"
+
+    _record_ms(mid, 1000)
+    body = admin.get("/api/status").json()
+    assert body["monitors"][0]["status"] == "degraded"
+    assert body["overall_status"] == "degraded_performance"
+    [incident] = body["incidents"]["active"]
+    assert incident["kind"] == "degraded"
+    assert incident["error"] == "Elevated latency: 1000 ms (usually 217 ms)"
+    assert body["monitors"][0]["uptime"]["24h"] == 100.0  # slow is still up
+
+    _record_ms(mid, 1000)  # stays the same incident
+    assert len(admin.get("/api/admin/incidents").json()) == 1
+
+    _record_ms(mid, 100)
+    body = admin.get("/api/status").json()
+    assert body["monitors"][0]["status"] == "up" and body["overall_status"] == "operational"
+    assert body["incidents"]["active"] == [] and body["incidents"]["past"][0]["kind"] == "degraded"
+
+
+def test_small_latency_increase_is_tolerated(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    _record_ms(mid, *[20] * 20)
+    _record_ms(mid, 150, 150, 150)  # several times slower, but within the 200 ms margin
+    assert admin.get("/api/status").json()["monitors"][0]["status"] == "up"
+
+
+def test_no_degradation_without_enough_history(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    _record_ms(mid, 100, 100, 5000, 5000, 5000)
+    assert admin.get("/api/status").json()["monitors"][0]["status"] == "up"
+
+
+def test_degraded_then_down_switches_incident(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    _record_ms(mid, *[100] * 20, 1000, 1000, 1000)
+    record_result(mid, ProbeResult(False, None, None, "Timeout"))
+    body = admin.get("/api/status").json()
+    assert body["overall_status"] == "major_outage"
+    [active] = body["incidents"]["active"]
+    assert active["kind"] == "down" and active["error"] == "Service unreachable"
+    assert body["incidents"]["past"][0]["kind"] == "degraded"
+
+
+def test_day_colour_follows_what_happened(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    _record_ms(mid, *[100] * 20, 1000, 1000, *[1000] * 3)  # 3 of 25 checks degraded
+    today = admin.get("/api/status").json()["monitors"][0]["days"][-1]
+    assert today["degraded_checks"] == 3 and today["state"] == "up"
+
+    _record_ms(mid, *[1000] * 20)  # now slow more often than normal
+    body = admin.get("/api/status").json()
+    today = body["monitors"][0]["days"][-1]
+    assert today["degraded_checks"] == 23 and today["state"] == "degraded"
+    assert body["overall_days"][-1]["state"] == "degraded"
+
+    record_result(mid, ProbeResult(False, None, None, "Timeout"))  # any outage wins
+    body = admin.get("/api/status").json()
+    assert body["monitors"][0]["days"][-1]["state"] == "down"
+    assert body["overall_days"][-1] | {"uptime": None} == {
+        "date": today["date"], "uptime": None, "down_checks": 1, "degraded_checks": 23, "state": "down"
+    }
+    assert body["monitors"][0]["days"][0]["state"] is None  # no data
+
+
+def test_degradation_can_be_disabled(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    settings = dataclasses.replace(get_settings(), degraded_factor=0.0)
+    for ms in [100] * 20 + [5000] * 3:
+        record_result(mid, ProbeResult(True, ms, 200, None), settings)
+    assert admin.get("/api/status").json()["monitors"][0]["status"] == "up"
+
+
+def test_upgrade_keeps_existing_incidents_as_outages():
+    from alembic import command
+    from alembic.config import Config
+
+    from app.__main__ import ROOT
+    from app.db import engine
+
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.attributes["skip_logging"] = True
+    command.downgrade(cfg, "0001")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO monitors (id, name, url, interval_seconds, timeout_seconds, enabled, is_public,"
+            " show_url, sort_order, status, created_at, updated_at) VALUES (1, 'Old', 'https://example.com/',"
+            " 60, 10, 1, 1, 0, 0, 'down', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO incidents (monitor_id, started_at, error) VALUES (1, '2026-01-01 00:00:00', 'Timeout')"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO daily_stats (monitor_id, day, total_checks, up_checks, response_ms_sum,"
+            " response_ms_count) VALUES (1, '2026-01-01', 10, 9, 900, 9)"
+        )
+    command.upgrade(cfg, "head")
+    with SessionLocal() as db:
+        assert [i.kind for i in db.query(Incident)] == ["down"]
+        assert [s.degraded_checks for s in db.query(DailyStat)] == [0]
 
 
 def test_disallowed_port_rejected(admin):

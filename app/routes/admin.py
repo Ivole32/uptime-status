@@ -137,6 +137,7 @@ def list_incidents(
             "monitor_name": name,
             "started_at": inc.started_at,
             "resolved_at": inc.resolved_at,
+            "kind": inc.kind,
             "error": inc.error,
         }
         for inc, name in rows

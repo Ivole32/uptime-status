@@ -131,6 +131,7 @@ class IncidentOut(BaseModel):
     monitor_name: str
     started_at: UTCDateTime
     resolved_at: UTCDateTime | None
+    kind: str
     error: str | None
 
 

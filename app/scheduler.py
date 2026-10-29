@@ -6,12 +6,13 @@ import asyncio
 import functools
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import date, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from .checker import ProbeResult, probe
-from .config import Settings
+from .config import Settings, get_settings
 from .db import session_scope, utcnow
 from .models import AdminSession, Check, DailyStat, Incident, Monitor
 
@@ -21,10 +22,47 @@ TICK_SECONDS = 1.0
 MAINTENANCE_INTERVAL = timedelta(hours=1)
 RETRY_DELAY_SECONDS = 2.0
 INCIDENT_RETENTION = timedelta(days=400)
+# Latency degradation: the last few checks must all be slow, so one spike is not an alert,
+# and the usual latency must be known from enough checks before anything counts as slow.
+DEGRADED_CHECKS = 3
+BASELINE_DAYS = 7
+BASELINE_MIN_CHECKS = 20
 
 
-def record_result(monitor_id: int, result: ProbeResult) -> None:
+def _elevated_latency(db: Session, monitor_id: int, today: date, settings: Settings) -> str | None:
+    """Describe the elevated latency if the recent checks are much slower than usual."""
+    if not settings.degraded_factor:
+        return None
+    # Checks made while degraded are left out, so a long slowdown does not become the norm.
+    total_ms, count = db.execute(
+        select(
+            func.sum(DailyStat.response_ms_sum - DailyStat.degraded_ms_sum),
+            func.sum(DailyStat.response_ms_count - DailyStat.degraded_checks),
+        ).where(
+            DailyStat.monitor_id == monitor_id,
+            DailyStat.day > today - timedelta(days=BASELINE_DAYS),
+        )
+    ).one()
+    if not count or count < BASELINE_MIN_CHECKS:
+        return None
+    usual = total_ms / count
+    threshold = max(usual * settings.degraded_factor, usual + settings.degraded_min_ms)
+    recent = db.execute(
+        select(Check.ok, Check.response_ms)
+        .where(Check.monitor_id == monitor_id)
+        .order_by(Check.checked_at.desc(), Check.id.desc())
+        .limit(DEGRADED_CHECKS)
+    ).all()
+    if len(recent) < DEGRADED_CHECKS or not all(
+        ok and ms is not None and ms > threshold for ok, ms in recent
+    ):
+        return None
+    return f"Elevated latency: {recent[0].response_ms} ms (usually {round(usual)} ms)"
+
+
+def record_result(monitor_id: int, result: ProbeResult, settings: Settings | None = None) -> None:
     """Persist a check and update monitor state, daily rollup and incidents."""
+    settings = settings or get_settings()
     now = utcnow()
     with session_scope() as db:
         monitor = db.get(Monitor, monitor_id)
@@ -48,6 +86,8 @@ def record_result(monitor_id: int, result: ProbeResult) -> None:
                 day=now.date(),
                 total_checks=0,
                 up_checks=0,
+                degraded_checks=0,
+                degraded_ms_sum=0,
                 response_ms_sum=0,
                 response_ms_count=0,
             )
@@ -58,19 +98,32 @@ def record_result(monitor_id: int, result: ProbeResult) -> None:
         if result.ok and result.response_ms is not None:
             stat.response_ms_sum += result.response_ms
             stat.response_ms_count += 1
+        db.flush()  # the latency check below reads this check and rollup back
 
+        if result.ok:
+            slow = _elevated_latency(db, monitor_id, now.date(), settings)
+            kind, reason = ("degraded", slow) if slow else (None, None)
+        else:
+            kind, reason = "down", result.error
+
+        # One open incident per monitor. A change between down and degraded closes the
+        # old incident and opens a new one, so each keeps its own start and reason.
         open_incident = db.scalar(
             select(Incident)
             .where(Incident.monitor_id == monitor_id, Incident.resolved_at.is_(None))
             .order_by(Incident.started_at.desc())
             .limit(1)
         )
-        if result.ok and open_incident is not None:
+        if open_incident is not None and open_incident.kind != kind:
             open_incident.resolved_at = now
-        elif not result.ok and open_incident is None:
-            db.add(Incident(monitor_id=monitor_id, started_at=now, error=result.error))
+            open_incident = None
+        if kind is not None and open_incident is None:
+            db.add(Incident(monitor_id=monitor_id, started_at=now, kind=kind, error=reason))
 
-        monitor.status = "up" if result.ok else "down"
+        if kind == "degraded":
+            stat.degraded_checks += 1
+            stat.degraded_ms_sum += result.response_ms
+        monitor.status = kind or "up"
         monitor.last_checked_at = now
         monitor.last_response_ms = result.response_ms
         monitor.last_status_code = result.status_code
@@ -141,7 +194,7 @@ class Scheduler:
                         break
                     await asyncio.sleep(RETRY_DELAY_SECONDS)
                     result = await loop.run_in_executor(self._probe_pool, run_probe)
-                await asyncio.to_thread(record_result, monitor_id, result)
+                await asyncio.to_thread(record_result, monitor_id, result, self.settings)
         except Exception:
             log.exception("Check for monitor %s failed unexpectedly", monitor_id)
         finally:
