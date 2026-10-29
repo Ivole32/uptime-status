@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import ipaddress
 import logging
+import os
 import secrets
 import threading
 import time
@@ -63,8 +64,19 @@ class _CredentialStore:
         # length, and copies can preserve the old mtime. The file is tiny.
         try:
             raw = path.read_bytes()
-        except OSError:
+        except FileNotFoundError:
             log.error("Credentials file %s is missing; admin login is disabled", path)
+            return None
+        except PermissionError:
+            log.error(
+                "Credentials file %s exists but is not readable (permission denied); admin login is "
+                "disabled. %s",
+                path,
+                _ownership_hint(path),
+            )
+            return None
+        except OSError as exc:
+            log.error("Credentials file %s cannot be read (%s); admin login is disabled", path, exc)
             return None
         digest = hashlib.sha256(raw).digest()
         with self._lock:
@@ -91,6 +103,45 @@ class _CredentialStore:
             log.error("Credentials file %s has an invalid username", path)
             return None
         return Credentials(username=username, password_hash=password_hash)
+
+
+def _outside_id(map_file: str, inside: int) -> int | None:
+    """Translate an ID through a /proc/self/{uid,gid}_map file ("inside outside count" lines)."""
+    try:
+        lines = Path(map_file).read_text(encoding="ascii").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            start, outside, count = (int(field) for field in line.split())
+        except ValueError:
+            continue
+        if start <= inside < start + count:
+            return outside + inside - start
+    return None
+
+
+def _ownership_hint(path: Path) -> str:
+    """Tell the operator which host user must own the file.
+
+    With Docker user-namespace remapping (userns-remap), the container user is a
+    different UID on the host (e.g. 10001 becomes 110001), so a chown to 10001 on
+    the host does not help.
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:  # not on Linux
+        return "Make it readable for the user the app runs as."
+    uid, gid = getuid(), os.getgid()
+    host_uid = _outside_id("/proc/self/uid_map", uid)
+    host_gid = _outside_id("/proc/self/gid_map", gid)
+    if host_uid is None or host_gid is None:
+        return f"Make it readable for UID {uid}."
+    remapped = " (Docker user-namespace remapping is active)" if host_uid != uid else ""
+    return (
+        f"The app runs as UID {uid}, which is UID {host_uid} on the Docker host{remapped}. "
+        f"On the host, run `sudo scripts/fix-config-permissions.sh`, or "
+        f"`sudo chown {host_uid}:{host_gid}` the config directory and {path.name}."
+    )
 
 
 credential_store = _CredentialStore()

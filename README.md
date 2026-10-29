@@ -48,13 +48,17 @@ username = "admin"
 password_hash = "$scrypt$ln=15,r=8,p=1$...$..."
 ```
 
-On Linux, let only the container user (UID 10001) read it. The container mounts the whole
-`config/` directory, so it must be able to open the directory too:
+On Linux, make it readable for the container user, and for nobody else:
 
 ```bash
-sudo chown 10001:10001 config config/admin.toml
-sudo chmod 0500 config && sudo chmod 0400 config/admin.toml
+sudo scripts/fix-config-permissions.sh
 ```
+
+The app runs as UID 10001 inside the container, but which host user that is depends on Docker.
+Without user-namespace remapping it is 10001. With `userns-remap` it is shifted, typically to
+110001, so a plain `chown 10001` locks the container out. The script asks Docker for the actual
+mapping, gives `config/` (mode `0500`) and `admin.toml` (mode `0400`) to that user, and checks
+that the container can read the file. It builds the image first if needed.
 
 **2. Configure** (optional): `cp .env.example .env` and set at least `UPTIME_ALLOWED_HOSTS`.
 
@@ -71,9 +75,10 @@ The app listens on `127.0.0.1:8000`. Open `http://localhost:8000/admin` to sign 
 Edit `config/admin.toml` with any tool. The change applies on the next request, no restart
 needed, and **every existing session is signed out**. The log then shows
 `Loaded admin credentials from /config/admin.toml (fingerprint …)` with a new fingerprint, so
-you can confirm the change took effect. Keep the file readable by UID 10001 (some editors
-replace the file and reset its owner). If the file is missing or invalid, admin login is
-disabled (the public page keeps working) and an error is logged.
+you can confirm the change took effect. Some editors replace the file and reset its owner, so
+run `sudo scripts/fix-config-permissions.sh` again after editing. If the file is missing,
+unreadable or invalid, admin login is disabled (the public page keeps working) and an error is
+logged. For an unreadable file, the error names the host UID that must own it.
 
 The compose file mounts the whole `config/` directory, not the single file. Docker pins a
 single-file mount to the original file, so changes saved by editors or tools that write a new

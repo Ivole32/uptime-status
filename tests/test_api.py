@@ -352,6 +352,41 @@ def test_non_utf8_credentials_file_disables_login(client):
     assert res.status_code == 401
 
 
+def test_outside_id_follows_userns_remap(tmp_path):
+    from app.auth import _outside_id
+
+    remapped = tmp_path / "remapped"
+    remapped.write_text("         0     100000      65536\n", encoding="ascii")
+    identity = tmp_path / "identity"
+    identity.write_text("         0          0 4294967295\n", encoding="ascii")
+    assert _outside_id(str(remapped), 10001) == 110001
+    assert _outside_id(str(identity), 10001) == 10001
+    assert _outside_id(str(remapped), 70000) is None  # outside the mapped range
+    assert _outside_id(str(tmp_path / "absent"), 10001) is None
+
+
+def test_unreadable_credentials_logged_as_permission_problem(client, monkeypatch, caplog):
+    from pathlib import Path
+
+    def deny(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "read_bytes", deny)
+    monkeypatch.setattr("app.auth._ownership_hint", lambda path: "HINT")
+    with caplog.at_level("ERROR", logger="uptime.auth"):
+        res = client.post("/api/auth/login", json={"username": USERNAME, "password": PASSWORD})
+    assert res.status_code == 401
+    assert "not readable (permission denied)" in caplog.text and "HINT" in caplog.text
+    assert "missing" not in caplog.text
+
+
+def test_missing_credentials_file_logged_as_missing(client, caplog):
+    CREDENTIALS_FILE.unlink()
+    with caplog.at_level("ERROR", logger="uptime.auth"):
+        client.post("/api/auth/login", json={"username": USERNAME, "password": PASSWORD})
+    assert "is missing" in caplog.text and "permission" not in caplog.text
+
+
 def test_missing_credentials_file_disables_login(client):
     CREDENTIALS_FILE.unlink()
     res = client.post("/api/auth/login", json={"username": USERNAME, "password": PASSWORD})
