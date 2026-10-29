@@ -1,7 +1,6 @@
 # Security
 
-This document describes the security design of Uptime Status and the results of the security
-audit done before the first release (2026-10-27).
+This document describes the security design of Uptime Status.
 
 ## Reporting a vulnerability
 
@@ -62,78 +61,7 @@ The app fetches admin-supplied URLs, so it is an SSRF vector by nature. Defences
 Setting `UPTIME_ALLOW_PRIVATE_TARGETS=true` deliberately turns off the address checks, for
 monitoring internal services. Only do that if you understand the consequences.
 
-## Audit (2026-10-27)
-
-Method:
-- Manual code review of every backend, frontend and deployment file.
-- A second, independent review by a reviewer who did not see the first one's conclusions.
-- `pip-audit` of the pinned dependencies.
-- Inspection of the running container.
-- Automated tests for each security control (106 tests, run on Python 3.11 and 3.13).
-- End-to-end attack attempts against the running container.
-
-No critical or high-severity issues were found.
-
-### Verified by test or live attack
-
-- Login with a wrong password or wrong username returns an identical `401`.
-- **Live:** the 6th attempt from one client returns `429`, while another client (different
-  `X-Forwarded-For` behind the trusted gateway) can still try.
-- A burst of logins while both hash slots are busy is rejected immediately and not counted
-  against the client.
-- Admin endpoints return `401` without a session. A missing or forged CSRF token returns `403`.
-  A cross-origin `Origin` or `Sec-Fetch-Site: cross-site` returns `403`. A form-encoded body
-  returns `415`. A body over 64 KiB returns `413`.
-- The session token is not stored in plaintext. Expired sessions are rejected. Logout revokes
-  the session. Editing `admin.toml` revokes all sessions. A missing `admin.toml` disables login.
-- These targets are rejected at input validation:
-  - `http://169.254.169.254/`, `127.0.0.1`, `localhost`, `file://`, `host.docker.internal`
-  - `[::ffff:127.0.0.1]`, `::7f00:1`, `::ffff:0:7f00:1`, `fec0::1`, `192.0.0.192`
-  - 6to4 and Teredo forms
-  - fullwidth `１２７．０．０．１`, `127.1`, `0x7f.1`
-  - non-allowlisted ports
-- **Live:** `http://localtest.me:8000`, a public name that resolves to `127.0.0.1`, was blocked
-  at check time.
-- Simulated DNS rebinding, mixed public/private DNS records, and redirects to `127.0.0.1` or to
-  a disallowed port are all blocked. Stored URLs that violate a tightened policy are blocked at
-  check time. A slow-trickling server is cut off at the deadline.
-- `<b>` in a monitor description renders as literal text on the public page.
-- The container runs as `uid=10001`. Writing to `/app` fails (read-only). `CapEff=0`.
-- `pip-audit`: no known vulnerabilities in fastapi 0.162.0, uvicorn 0.54.0, SQLAlchemy 2.1.6,
-  alembic 1.20.1 and their dependencies.
-
-### Findings fixed during the audit
-
-| # | Severity | Finding | Fix |
-| --- | --- | --- | --- |
-| 1 | Medium | In the default deployment, connections reached the container from the Docker gateway, but `X-Forwarded-For` was only trusted from `127.0.0.1`. Every client shared one rate-limit bucket, so anyone could lock the admin out with 5 wrong passwords. | The compose network is pinned (`172.30.0.0/24`), and its gateway is trusted for `X-Forwarded-For` by default. Verified live. |
-| 2 | Medium | A global cap of 100 failed logins per 15 min let anyone lock out the real admin, and per-IP buckets let an IPv6 attacker rotate through a /64. | The global cap was removed. IPv6 clients are bucketed per /64. |
-| 3 | Medium | The rate-limit check and the failure record were not atomic, so a concurrent burst could exceed the limit. Queued scrypt calls also held worker threads, which stalled the public API. | Attempts are reserved atomically before hashing. The hash semaphore is non-blocking and returns an immediate `429`. |
-| 4 | Medium | Check timeouts applied per socket read, so a trickling server could hold a check, and a shared executor, for a very long time, while the public page kept showing the last state. | A watchdog closes the socket at the total deadline. Probes have their own thread pool. Monitors without recent checks are shown as "No recent data". |
-| 5 | Low | Leading and trailing whitespace was stripped from login passwords, so such passwords could never log in. | The password is no longer stripped. Only the username is. |
-| 6 | Low | The SSRF filter missed IPv4-compatible and IPv4-translated IPv6, `fec0::/10`, and (on Python before 3.12.4) `192.0.0.192`, 6to4 and local NAT64. Any port was allowed. The public error text worked as a port-scan oracle. | An explicit deny list that works the same on every Python version. Embedded IPv4 is extracted and checked. A port allowlist. Stored URLs are validated again on every check. Public errors are coarse. |
-| 7 | Low | `hmac.compare_digest` on usernames of different lengths can leak the length through timing. | Compare SHA-256 digests of both values. |
-| 8 | Low | Huge integer path IDs (e.g. `10**30`) caused an integer overflow in the SQLite driver, which returned a 500. | IDs are bounded to `1..2^31-1`, so the request gets a `422`. |
-| 9 | Low | A rate-limit key bug (found by live testing) made logins from IPv4 clients fail with a 500. | Fixed, with a regression test. |
-| 10 | Info | Validation accepted fullwidth digits and shorthand IPv4 forms (these were still blocked at probe time). | IP literals are checked again after IDNA conversion, and numeric hostnames are rejected. |
-| 11 | Info | Trailing-slash redirects built `Location` from the client's `Host` header. | `redirect_slashes=False`. A warning is logged when `UPTIME_ALLOWED_HOSTS` is unset. |
-| 12 | Info | Incidents were never pruned, CI actions were pinned by tag, and the Dockerfile used `&& … \|\| true`, which could hide a failing build step. | Incidents are pruned after 400 days. Actions are pinned to commit SHAs. The Dockerfile steps are split so failures surface. |
-
-### Follow-up audit (2026-10-29)
-
-Findings were checked by independent reviewers, most of them reproduced by running code.
-Fixed so far:
-
-| # | Severity | Finding | Fix |
-| --- | --- | --- | --- |
-| 13 | Medium | `admin.toml` was bind-mounted as a single file. Docker pins such a mount to the original inode, so a password changed with a tool that saves by renaming (`sed -i`, vim, Ansible) never reached the container: the old password and all sessions stayed valid until a restart. The reload check also used only mtime and size, and a new hash always has the same size. | Compose mounts the `config/` directory. Changes are detected by content hash. Each load logs the credential fingerprint. A non-UTF-8 file now disables login instead of causing 500s. |
-| 14 | Medium | Only the 4 direct dependencies were pinned, with no hashes. 14 transitive packages floated, so each build could install different code than CI had audited. | Hashed lock for all packages, `--require-hashes --no-deps`, and `pip-audit` as a build gate and in CI. |
-| 15 | Medium | The check deadline did not cover DNS (`getaddrinfo` has no timeout and ran before the watchdog), and the watchdog could not stop a connection whose deadline passed during connect or the TLS handshake. Reproduced: a 2 s check held for 21 s, a 1 s check took 4 s and was recorded as up. | One absolute deadline for all phases. DNS on a separate pool with a timeout. Connections are published to a single shared watchdog before the handshake, with an abort flag so no abort is lost. |
-| 16 | Low | The per-request watchdog timer cost a thread per check and could race, labelling timeouts as "Connection reset". Running out of threads (pids limit) recorded healthy monitors as down. | Shared watchdog thread. Thread exhaustion now only delays a check. The safe `UPTIME_CHECK_CONCURRENCY` (25 with `pids_limit: 128`) is documented, based on measurements. |
-| 17 | Low | Base image `bookworm` gets only LTS security support since July 2026. No image scanning. | Debian 13 `trixie`, and Trivy in CI. |
-| 18 | Low | The SSRF filter could not block the Docker host's own public IP. Requests to it arrive from a private `172.30.0.x` source. Azure WireServer `168.63.129.16` counted as public. Network-level egress filtering was not documented. | `UPTIME_BLOCKED_NETWORKS`, WireServer blocked, host firewall rules in the README. |
-
-### Accepted risks and operator responsibilities
+## Accepted risks and operator responsibilities
 
 - **Set `UPTIME_ALLOWED_HOSTS`** in production. Without it, any `Host` header is accepted
   (a warning is logged at startup).
@@ -147,8 +75,7 @@ Fixed so far:
 - **uvicorn has no header-read timeout.** This is mitigated by publishing on loopback only,
   behind a reverse proxy, which should enforce its own timeouts.
 - **Image CVEs.** CI scans the image with Trivy. Debian findings without a fixed package
-  version are ignored, because they cannot be patched by rebuilding. On 2026-10-29 that was
-  164 unfixed findings (44 HIGH, 0 CRITICAL) and none with a fix. Dependabot keeps the digest
+  version are ignored, because they cannot be patched by rebuilding. Dependabot keeps the digest
   current, but it never moves to the next Debian release; change the tag when one comes out.
 - **Network-level egress filtering** is the operator's job. The README gives host firewall
   rules for `br-uptime`. They were not tested in this repository's CI.
