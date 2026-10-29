@@ -87,12 +87,16 @@ Then set in `.env`:
 UPTIME_ALLOWED_HOSTS=status.example.com
 ```
 
-The compose file pins the Docker network to `172.30.0.0/24`. A proxy on the Docker host
+The service runs on its own dedicated bridge network, `uptime-status`, with host interface
+`br-uptime`. Containers from other stacks cannot reach it. The network's subnet is pinned to
+`172.30.0.0/24`. A proxy on the Docker host
 reaches the container from that network's gateway `172.30.0.1`, which is trusted for
 `X-Forwarded-For` by default. The login rate limiter needs this to tell clients apart. If
 that subnet clashes with your network, change `UPTIME_SUBNET` and
-`UPTIME_FORWARDED_ALLOW_IPS` together. If your proxy runs in another container, set
-`UPTIME_FORWARDED_ALLOW_IPS` to that container's address. The proxy must pass the original
+`UPTIME_FORWARDED_ALLOW_IPS` together. If your proxy runs in another container, don't
+put it on `uptime-status`. Instead, use a shared `proxy` network that only the proxy and
+the services it fronts join (see the commented block in `docker-compose.yml`), and set
+`UPTIME_FORWARDED_ALLOW_IPS` to the proxy container's address. The proxy must pass the original
 `Host` header: Caddy does this by default, and nginx needs `proxy_set_header Host $host;`.
 
 ## Configuration

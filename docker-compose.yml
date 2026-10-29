@@ -7,6 +7,8 @@ services:
     # Bound to localhost only: put a TLS-terminating reverse proxy in front (see README).
     ports:
       - "127.0.0.1:${UPTIME_PORT:-8000}:8000"
+    networks:
+      - uptime
     environment:
       UPTIME_COOKIE_SECURE: ${UPTIME_COOKIE_SECURE:-true}
       UPTIME_ALLOWED_HOSTS: ${UPTIME_ALLOWED_HOSTS:-}
@@ -45,11 +47,25 @@ services:
         max-file: "3"
 
 networks:
-  default:
-    # Fixed subnet so the gateway address above is predictable.
+  # Dedicated network for this service group only. Other stacks cannot reach the
+  # container. It is not `internal`, because checks need outbound internet access.
+  uptime:
+    name: uptime-status
+    driver: bridge
+    driver_opts:
+      # Stable host-side interface name, handy for host firewall rules.
+      com.docker.network.bridge.name: br-uptime
     ipam:
       config:
+        # Fixed subnet so the gateway address trusted above is predictable.
         - subnet: ${UPTIME_SUBNET:-172.30.0.0/24}
+
+  # Proxy running in another container instead of on the host? Create a shared
+  # network once (`docker network create proxy`), attach only the proxy and this
+  # service to it, uncomment below, add `- proxy` to the service's networks, and
+  # set UPTIME_FORWARDED_ALLOW_IPS to the proxy container's address.
+  # proxy:
+  #   external: true
 
 volumes:
   uptime-data:
