@@ -47,7 +47,11 @@ WORKDIR /app
 COPY LICENSE alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
-RUN python -m compileall -q /app /venv
+# COPY keeps the permissions of the checkout. A checkout made with a strict umask
+# (e.g. 077) would leave the code unreadable for the runtime user, so normalise it:
+# readable by everyone, writable only by root.
+RUN chmod -R u=rwX,go=rX /app \
+ && python -m compileall -q /app /venv
 
 USER 10001:10001
 EXPOSE 8000

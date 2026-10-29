@@ -48,10 +48,12 @@ username = "admin"
 password_hash = "$scrypt$ln=15,r=8,p=1$...$..."
 ```
 
-On Linux, let only the container user (UID 10001) read it:
+On Linux, let only the container user (UID 10001) read it. The container mounts the whole
+`config/` directory, so it must be able to open the directory too:
 
 ```bash
-sudo chown 10001:10001 config/admin.toml && sudo chmod 0400 config/admin.toml
+sudo chown 10001:10001 config config/admin.toml
+sudo chmod 0500 config && sudo chmod 0400 config/admin.toml
 ```
 
 **2. Configure** (optional): `cp .env.example .env` and set at least `UPTIME_ALLOWED_HOSTS`.
