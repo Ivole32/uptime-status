@@ -276,3 +276,13 @@ app/
 migrations/      Alembic migrations
 tests/           pytest suite
 ```
+
+## License
+
+Uptime Status is free software, licensed under the
+[GNU General Public License v3.0](LICENSE). You may use, study, change and share it. If you
+distribute it or a modified version, including as a container image, you must do so under the
+same license and make the corresponding source code available. See [LICENSE](LICENSE) for the
+full terms.
+
+Contributions are welcome under the same license; see [CONTRIBUTING.md](CONTRIBUTING.md).

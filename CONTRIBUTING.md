@@ -100,4 +100,11 @@ If a change touches a security control, add a test for it and update [SECURITY.m
 The maintainer reviews every pull request and may ask for changes. Please be patient: this is a
 small project, so reviews can take a while.
 
+## License
+
+Uptime Status is licensed under the [GNU General Public License v3.0](LICENSE). By submitting a
+contribution, you agree that it is licensed under the same terms, and you confirm that you have
+the right to contribute it under that license (for example, it is your own work, or it comes
+from a GPL-3.0-compatible source that you name in the pull request).
+
 Thank you for contributing.

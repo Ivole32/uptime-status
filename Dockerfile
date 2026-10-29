@@ -25,7 +25,8 @@ RUN python -m venv /audit \
 # ---- Runtime stage ----
 FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 LABEL org.opencontainers.image.title="uptime-status" \
-      org.opencontainers.image.description="Self-hosted uptime status page"
+      org.opencontainers.image.description="Self-hosted uptime status page" \
+      org.opencontainers.image.licenses="GPL-3.0"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -43,7 +44,7 @@ RUN python -m pip uninstall -y pip
 COPY --from=build /venv /venv
 WORKDIR /app
 # Application code is owned by root and not writable by the runtime user.
-COPY alembic.ini ./
+COPY LICENSE alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 RUN python -m compileall -q /app /venv
