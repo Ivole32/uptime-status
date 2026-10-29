@@ -1,0 +1,2 @@
+# Vulnerability scanner, run against the exact pins during the image build and in CI.
+pip-audit==2.10.1

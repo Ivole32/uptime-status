@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 from app.checker import ProbeResult
@@ -285,6 +286,24 @@ def test_credential_change_revokes_sessions(admin):
     assert admin.get("/api/admin/monitors").status_code == 401
     res = admin.post("/api/auth/login", json={"username": "newadmin", "password": PASSWORD})
     assert res.status_code == 200
+
+
+def test_password_change_detected_with_same_size_and_mtime(admin):
+    """A new hash has the same length; copies can keep the old mtime. Content decides."""
+    before = CREDENTIALS_FILE.stat()
+    write_credentials(password="a different password")
+    os.utime(CREDENTIALS_FILE, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = CREDENTIALS_FILE.stat()
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    assert admin.get("/api/admin/monitors").status_code == 401
+    res = admin.post("/api/auth/login", json={"username": USERNAME, "password": PASSWORD})
+    assert res.status_code == 401
+
+
+def test_non_utf8_credentials_file_disables_login(client):
+    CREDENTIALS_FILE.write_bytes(b'username = "adm\xe9n"\npassword_hash = "x"\n')
+    res = client.post("/api/auth/login", json={"username": USERNAME, "password": PASSWORD})
+    assert res.status_code == 401
 
 
 def test_missing_credentials_file_disables_login(client):

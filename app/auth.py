@@ -5,8 +5,10 @@ The credentials file (``UPTIME_CREDENTIALS_FILE``) looks like::
     username = "admin"
     password_hash = "$scrypt$ln=15,r=8,p=1$...$..."
 
-It is re-read whenever it changes, so editing it takes effect without a
-restart. Every session is bound to a fingerprint of the current credentials:
+It is re-read whenever its content changes, so editing it takes effect without
+a restart (mount its directory, not the file itself: a single-file bind mount
+never sees editors that save by renaming). Every session is bound to a
+fingerprint of the current credentials:
 changing the username or password hash signs out all existing sessions.
 """
 
@@ -54,29 +56,35 @@ class Credentials:
 class _CredentialStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: tuple[Path, float, int, Credentials | None] | None = None
+        self._cache: tuple[Path, bytes, Credentials | None] | None = None
 
     def load(self, path: Path) -> Credentials | None:
+        # Keyed on the content, not on mtime/size: a new hash always has the same
+        # length, and copies can preserve the old mtime. The file is tiny.
         try:
-            stat = path.stat()
+            raw = path.read_bytes()
         except OSError:
             log.error("Credentials file %s is missing; admin login is disabled", path)
             return None
+        digest = hashlib.sha256(raw).digest()
         with self._lock:
-            if self._cache and self._cache[:3] == (path, stat.st_mtime, stat.st_size):
-                return self._cache[3]
-            creds = self._parse(path)
-            self._cache = (path, stat.st_mtime, stat.st_size, creds)
-            return creds
+            if self._cache and self._cache[:2] == (path, digest):
+                return self._cache[2]
+            creds = self._parse(path, raw)
+            self._cache = (path, digest, creds)
+        if creds is not None:
+            # Lets operators confirm in the logs that a password change took effect.
+            log.info("Loaded admin credentials from %s (fingerprint %s)", path, creds.fingerprint[:12])
+        return creds
 
     @staticmethod
-    def _parse(path: Path) -> Credentials | None:
+    def _parse(path: Path, raw: bytes) -> Credentials | None:
         try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
+            data = tomllib.loads(raw.decode("utf-8"))
             username = str(data["username"]).strip()
             password_hash = str(data["password_hash"]).strip()
             parse_hash(password_hash)
-        except (OSError, tomllib.TOMLDecodeError, KeyError, InvalidHashError) as exc:
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, InvalidHashError) as exc:
             log.error("Credentials file %s is invalid (%s); admin login is disabled", path, exc)
             return None
         if not username or len(username) > MAX_USERNAME_LENGTH:

@@ -77,6 +77,7 @@ class MonitorBase(_Strict):
                 value,
                 allow_private=settings.allow_private_targets,
                 allowed_ports=settings.allowed_ports,
+                blocked=settings.blocked_networks,
             )
         except TargetError as exc:
             raise ValueError(str(exc)) from exc

@@ -1,0 +1,6 @@
+# Runtime dependencies (kept deliberately small). Edit this file, then regenerate the
+# hashed lock, requirements.txt (see README, "Updating dependencies").
+fastapi==0.162.0
+uvicorn==0.54.0
+sqlalchemy==2.1.6
+alembic==1.20.1

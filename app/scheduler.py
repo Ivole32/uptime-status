@@ -94,6 +94,10 @@ class Scheduler:
         self._probe_pool = ThreadPoolExecutor(
             max_workers=settings.check_concurrency, thread_name_prefix="probe"
         )
+        # DNS lookups run here so a check can stop waiting at its deadline.
+        self._dns_pool = ThreadPoolExecutor(
+            max_workers=settings.check_concurrency, thread_name_prefix="dns"
+        )
         self._in_flight: set[int] = set()
         self._tasks: set[asyncio.Task] = set()
         self._wake = asyncio.Event()
@@ -128,6 +132,8 @@ class Scheduler:
                     timeout,
                     allow_private=self.settings.allow_private_targets,
                     allowed_ports=self.settings.allowed_ports,
+                    blocked=self.settings.blocked_networks,
+                    resolver=self._dns_pool,
                 )
                 result = await loop.run_in_executor(self._probe_pool, run_probe)
                 for _ in range(self.settings.check_retries):
@@ -170,3 +176,4 @@ class Scheduler:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._probe_pool.shutdown(wait=False, cancel_futures=True)
+        self._dns_pool.shutdown(wait=False, cancel_futures=True)

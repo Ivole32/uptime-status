@@ -16,6 +16,7 @@ services:
       # where a reverse proxy on the host connects from. Trust its X-Forwarded-For.
       UPTIME_FORWARDED_ALLOW_IPS: ${UPTIME_FORWARDED_ALLOW_IPS:-172.30.0.1}
       UPTIME_ALLOW_PRIVATE_TARGETS: ${UPTIME_ALLOW_PRIVATE_TARGETS:-false}
+      UPTIME_BLOCKED_NETWORKS: ${UPTIME_BLOCKED_NETWORKS:-}
       UPTIME_SESSION_TTL_HOURS: ${UPTIME_SESSION_TTL_HOURS:-12}
       UPTIME_RAW_RETENTION_DAYS: ${UPTIME_RAW_RETENTION_DAYS:-30}
       UPTIME_PUBLIC_REFRESH_SECONDS: ${UPTIME_PUBLIC_REFRESH_SECONDS:-30}
@@ -23,9 +24,12 @@ services:
       UPTIME_ALLOWED_PORTS: ${UPTIME_ALLOWED_PORTS:-80,443,8080,8443}
     volumes:
       - uptime-data:/data
+      # Mount the directory, not the file: a single-file bind mount is pinned to
+      # the original inode, so edits saved via rename (sed -i, vim, Ansible, ...)
+      # would never reach the container and a password change would silently not apply.
       - type: bind
-        source: ./config/admin.toml
-        target: /config/admin.toml
+        source: ./config
+        target: /config
         read_only: true
         bind:
           create_host_path: false
@@ -37,6 +41,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # Threads count as pids. Keep pids_limit >= 3 x UPTIME_CHECK_CONCURRENCY + 50,
+    # i.e. concurrency <= 25 with 128 (see README, "Sizing UPTIME_CHECK_CONCURRENCY").
     pids_limit: 128
     mem_limit: 512m
     cpus: 1.0

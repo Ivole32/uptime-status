@@ -2,6 +2,7 @@ import ipaddress
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -126,7 +127,7 @@ def test_stored_url_revalidated_at_probe_time(monkeypatch):
 
 def test_redirect_to_disallowed_port_is_blocked(monkeypatch):
     monkeypatch.setattr(
-        checker, "_request_once", lambda url, timeout, allow_private: (302, "http://example.com:6379/")
+        checker, "_request_once", lambda url, deadline, policy: (302, "http://example.com:6379/")
     )
     result = probe("https://example.com/", 2, allowed_ports=frozenset({80, 443}))
     assert result.error == "Redirect to a disallowed URL"
@@ -153,14 +154,14 @@ def test_probe_blocks_mixed_records(monkeypatch):
 
 def test_probe_redirect_to_private_is_blocked(monkeypatch):
     monkeypatch.setattr(
-        checker, "_request_once", lambda url, timeout, allow_private: (302, "http://127.0.0.1/admin")
+        checker, "_request_once", lambda url, deadline, policy: (302, "http://127.0.0.1/admin")
     )
     result = probe("https://example.com/", 2)
     assert not result.ok and result.error == "Redirect to a disallowed URL"
 
 
 def test_probe_http_error_is_down(monkeypatch):
-    monkeypatch.setattr(checker, "_request_once", lambda url, timeout, allow_private: (503, None))
+    monkeypatch.setattr(checker, "_request_once", lambda url, deadline, policy: (503, None))
     result = probe("https://example.com/", 2)
     assert not result.ok and result.status_code == 503 and result.error == "HTTP 503"
 
@@ -195,6 +196,91 @@ def test_probe_enforces_total_deadline():
 
 def test_probe_redirect_loop(monkeypatch):
     monkeypatch.setattr(
-        checker, "_request_once", lambda url, timeout, allow_private: (301, "https://example.com/loop")
+        checker, "_request_once", lambda url, deadline, policy: (301, "https://example.com/loop")
     )
     assert probe("https://example.com/", 2).error == "Too many redirects"
+
+
+def test_dns_lookup_bounded_by_deadline(monkeypatch):
+    """getaddrinfo has no timeout; a hung lookup must not stretch the check."""
+    monkeypatch.setattr(checker.socket, "getaddrinfo", lambda *a, **k: time.sleep(3) or [])
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        started = time.monotonic()
+        result = probe("https://slow-dns.example.com/", 1, resolver=pool)
+        elapsed = time.monotonic() - started
+        assert result.error == "DNS resolution timed out"
+        assert elapsed < 1.5
+
+
+def test_slow_connect_cannot_dodge_the_watchdog(monkeypatch):
+    """If the deadline passes before the socket exists, the request must still stop."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def trickle():
+        conn, _ = server.accept()
+        try:
+            for _ in range(40):
+                conn.sendall(b"H")
+                time.sleep(0.2)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    real_connect = socket.create_connection
+
+    def slow_connect(*args, **kwargs):
+        time.sleep(1.2)  # the deadline (1 s) passes while connecting
+        return real_connect(*args, **kwargs)
+
+    threading.Thread(target=trickle, daemon=True).start()
+    monkeypatch.setattr(checker.socket, "create_connection", slow_connect)
+    started = time.monotonic()
+    result = probe(f"http://127.0.0.1:{port}/", 1, allow_private=True)
+    elapsed = time.monotonic() - started
+    server.close()
+    assert result.error == "Timeout"
+    assert elapsed < 2.5
+
+
+def test_stalled_tls_handshake_times_out():
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    accepted = []
+    threading.Thread(target=lambda: accepted.append(server.accept()), daemon=True).start()
+    started = time.monotonic()
+    result = probe(f"https://127.0.0.1:{port}/", 1, allow_private=True)
+    elapsed = time.monotonic() - started
+    server.close()
+    assert result.error == "Timeout"
+    assert elapsed < 2
+
+
+def test_azure_wireserver_is_not_public():
+    assert not _is_public(ipaddress.ip_address("168.63.129.16"))
+
+
+def test_blocked_networks():
+    blocked = (ipaddress.ip_network("203.0.114.0/24"), ipaddress.ip_network("10.9.0.0/16"))
+    with pytest.raises(TargetError, match="blocked"):
+        normalize_target("http://203.0.114.7/", blocked=blocked)
+    # Applies even when private targets are allowed, and to embedded IPv4.
+    with pytest.raises(TargetError, match="blocked"):
+        normalize_target("http://10.9.1.1/", allow_private=True, blocked=blocked)
+    with pytest.raises(TargetError, match="blocked"):
+        normalize_target("http://[::ffff:203.0.114.7]/", blocked=blocked)
+    assert normalize_target("http://10.8.1.1/", allow_private=True, blocked=blocked)
+
+
+def test_blocked_networks_checked_after_dns(monkeypatch):
+    monkeypatch.setattr(
+        checker.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("203.0.114.7", 443))]
+    )
+    blocked = (ipaddress.ip_network("203.0.114.0/24"),)
+    result = probe("https://own-host.example.com/", 2, blocked=blocked)
+    assert result.error == "Blocked: resolves to a non-public address"

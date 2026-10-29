@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -43,6 +44,14 @@ def _ports(name: str, default: str) -> frozenset[int] | None:
     return ports
 
 
+def _networks(name: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Comma-separated IPs or CIDRs."""
+    try:
+        return tuple(ipaddress.ip_network(item, strict=False) for item in _list(name))
+    except ValueError as exc:
+        raise ValueError(f"UPTIME_{name} must be a list of IP addresses or CIDRs: {exc}") from exc
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -52,6 +61,7 @@ class Settings:
     allowed_hosts: list[str] = field(default_factory=list)
     allow_private_targets: bool = False
     allowed_ports: frozenset[int] | None = frozenset({80, 443, 8080, 8443})
+    blocked_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
     scheduler_enabled: bool = True
     check_concurrency: int = 10
     check_retries: int = 1
@@ -79,6 +89,7 @@ def get_settings() -> Settings:
         allowed_hosts=_list("ALLOWED_HOSTS"),
         allow_private_targets=_bool("ALLOW_PRIVATE_TARGETS", False),
         allowed_ports=_ports("ALLOWED_PORTS", "80,443,8080,8443"),
+        blocked_networks=_networks("BLOCKED_NETWORKS"),
         scheduler_enabled=_bool("SCHEDULER_ENABLED", True),
         check_concurrency=_int("CHECK_CONCURRENCY", 10, 1, 100),
         check_retries=_int("CHECK_RETRIES", 1, 0, 5),

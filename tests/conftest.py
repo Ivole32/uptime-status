@@ -38,9 +38,6 @@ def write_credentials(username: str = USERNAME, password: str = PASSWORD) -> Non
         f'username = "{username}"\npassword_hash = "{hash_password(password, log_n=10)}"\n',
         encoding="utf-8",
     )
-    # Bump the mtime so the credential cache notices even on coarse filesystems.
-    stat = CREDENTIALS_FILE.stat()
-    os.utime(CREDENTIALS_FILE, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
 
 @pytest.fixture(autouse=True)

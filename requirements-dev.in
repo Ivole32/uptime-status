@@ -1,0 +1,6 @@
+# Development and CI tools. Runtime versions are taken from the runtime lock.
+-c requirements.txt
+-r requirements.in
+-r requirements-audit.in
+pytest==9.1.1
+httpx2==2.16.0
