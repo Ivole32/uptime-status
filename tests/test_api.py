@@ -1,8 +1,13 @@
+import dataclasses
 import os
 from datetime import timedelta
 
+from fastapi.testclient import TestClient
+
 from app.checker import ProbeResult
+from app.config import get_settings
 from app.db import SessionLocal, utcnow
+from app.main import app
 from app.models import AdminSession, Incident, Monitor
 from app.scheduler import record_result
 
@@ -206,6 +211,47 @@ def test_public_hides_private_data(admin):
     assert names["Public"]["url"] is None and shown["id"] == names["Public"]["id"]
     assert names["Linked"]["url"] == linked["url"]
     assert "interval_seconds" not in names["Public"]
+
+
+def test_hidden_urls_never_reach_anonymous_visitors(admin, monkeypatch):
+    """Operators keep private IPs and tokens in monitor URLs; only show_url may expose them."""
+    settings = dataclasses.replace(get_settings(), allow_private_targets=True, allowed_ports=None)
+    monkeypatch.setattr("app.schemas.get_settings", lambda: settings)
+    secret_monitors = [
+        {"name": "Router", "url": "http://192.168.178.1:8080/admin?token=SECRET-QUERY-123"},
+        {"name": "NAS", "url": "http://10.13.37.42/", "description": "Storage"},
+        {"name": "Internal host", "url": "http://secret-internal-host.corp.example/"},
+        {"name": "Hidden", "url": "http://172.20.99.7:9000/", "is_public": False},
+    ]
+    errors = ["Timeout", "DNS resolution failed", "HTTP 503", "Blocked: resolves to a non-public address"]
+    ids = []
+    for monitor, error in zip(secret_monitors, errors, strict=True):
+        res = admin.post("/api/admin/monitors", json={**MONITOR, **monitor})
+        assert res.status_code == 201, res.text
+        ids.append(res.json()["id"])
+        # Down with an open incident: the state that puts the most detail on the public page.
+        record_result(ids[-1], ProbeResult(False, 5, 503 if error == "HTTP 503" else None, error))
+    shown = admin.post("/api/admin/monitors", json={**MONITOR, "url": "example.org", "show_url": True})
+    record_result(shown.json()["id"], ProbeResult(True, 5, 200, None))
+
+    needles = ["192.168.178", "SECRET-QUERY", "token=", "/admin?", ":8080", "10.13.37", "secret-internal",
+               "corp.example", "172.20.99", ":9000"]
+    paths = ["/", "/admin", "/api/status", "/healthz", "/api/auth/me", "/api/admin/monitors",
+             "/api/admin/incidents", "/api/admin/settings", f"/api/admin/monitors/{ids[0]}/checks",
+             "/static/js/status.js", "/static/js/admin.js"]
+    with TestClient(app) as anonymous:
+        for path in paths:
+            res = anonymous.get(path)
+            seen = res.text + "".join(f"{k}: {v}\n" for k, v in res.headers.items())
+            leaked = [n for n in needles if n in seen]
+            assert not leaked, f"{path} exposes {leaked}"
+        body = anonymous.get("/api/status").json()
+
+    public = {m["name"]: m for m in body["monitors"]}
+    assert "Hidden" not in public
+    assert all(public[name]["url"] is None for name in ("Router", "NAS", "Internal host"))
+    assert {m["url"] for m in body["monitors"]} == {None, "https://example.org/"}
+    assert len(body["incidents"]["active"]) == 3  # the hidden monitor's incident is not listed
 
 
 def test_results_incidents_and_uptime(admin):
