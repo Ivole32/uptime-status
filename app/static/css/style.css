@@ -76,7 +76,7 @@ p { margin: 0; }
 .topbar-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 16px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 700; letter-spacing: 0.02em; min-width: 0; }
 .brand span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.brand-mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--up), color-mix(in srgb, var(--up) 40%, #0ea5e9)); flex: none; }
+.brand-mark { display: block; width: 22px; height: 22px; flex: none; }
 .nav { display: flex; align-items: center; gap: 4px; }
 .nav a, .nav button.link-btn { text-decoration: none; color: var(--muted); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 0.9rem; }
 .nav a:hover, .nav button.link-btn:hover { color: var(--text); background: var(--surface-2); }
