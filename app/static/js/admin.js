@@ -65,12 +65,50 @@
     $("login-view").hidden = true;
     $("app-view").hidden = false;
     $("logout-btn").hidden = false;
-    await Promise.all([loadMonitors(), loadIncidents(), loadSettings()]);
+    await Promise.all([loadMonitors(), loadIncidents(), loadSettings(), loadLegal()]);
     clearInterval(refreshTimer);
     refreshTimer = setInterval(() => {
-      if (!document.hidden && !$("monitor-dialog").open) { loadMonitors(); loadIncidents(); }
+      if (!document.hidden && !$("monitor-dialog").open && currentTab === "monitors") { loadMonitors(); loadIncidents(); }
     }, 15000);
   }
+
+  // ---------- Tabs ----------
+  const VIEWS = {
+    monitors: ["Monitors", "Add the domains you want to watch. Each one is requested on its own interval and its response time is recorded."],
+    settings: ["Settings", "Title, description and legal pages of the public status page."],
+  };
+  const tabs = [...document.querySelectorAll("[role=tab]")];
+  let currentTab = "monitors";
+
+  function selectTab(name, focus) {
+    if (!Object.hasOwn(VIEWS, name)) name = "monitors";
+    const changed = name !== currentTab;
+    currentTab = name;
+    for (const tab of tabs) {
+      const on = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      $("panel-" + tab.dataset.tab).hidden = !on;
+      if (on && focus) tab.focus();
+    }
+    $("view-title").textContent = VIEWS[name][0];
+    $("view-desc").textContent = VIEWS[name][1];
+    history.replaceState(null, "", name === "monitors" ? location.pathname : "#" + name);
+    // The monitor list is not refreshed in the background while hidden.
+    if (changed && name === "monitors" && !$("app-view").hidden) { loadMonitors(); loadIncidents(); }
+  }
+
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => selectTab(tab.dataset.tab));
+    tab.addEventListener("keydown", (event) => {
+      const i = tabs.indexOf(tab);
+      const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      selectTab(tabs[(next + tabs.length) % tabs.length].dataset.tab, true);
+    });
+  }
+  window.addEventListener("hashchange", () => selectTab(location.hash.slice(1)));
 
   // ---------- Login ----------
   $("login-form").addEventListener("submit", async (event) => {
@@ -308,8 +346,85 @@
     }
   });
 
+  // ---------- Legal pages ----------
+  const LEGAL_MAX = 100000;
+  const legalForms = [...document.querySelectorAll(".legal-form")];
+  const part = (f, role) => f.querySelector("[data-role=" + role + "]");
+  const numberFmt = new Intl.NumberFormat();
+
+  function updateCount(f) {
+    part(f, "count").textContent = numberFmt.format(f.elements.content.value.length) + " / " + numberFmt.format(LEGAL_MAX) + " characters";
+  }
+
+  function showPreview(f, on) {
+    part(f, "editor").hidden = on;
+    part(f, "preview").hidden = !on;
+    part(f, "toggle").textContent = on ? "Edit" : "Preview";
+    if (on) {
+      const blocks = UI.renderRichText(f.elements.content.value);
+      part(f, "preview").replaceChildren(...(blocks.length ? blocks : [h("p", { class: "muted", text: "Nothing to preview." })]));
+    }
+  }
+
+  function fillLegal(f, page) {
+    f.elements.title.value = page.title || "";
+    f.elements.content.value = page.content || "";
+    f.dataset.dirty = "";
+    part(f, "state").textContent = page.updated_at ? "Published · last changed " + fmtDateTime(page.updated_at) : "Not published";
+    part(f, "view").hidden = !page.content;
+    updateCount(f);
+    showPreview(f, false);
+  }
+
+  async function loadLegal() {
+    try {
+      const pages = await api("GET", "/api/admin/legal");
+      for (const page of pages) {
+        const f = legalForms.find((x) => x.dataset.kind === page.kind);
+        // Keep unsaved edits, for example after signing in again when the session expired.
+        if (f && !f.dataset.dirty) fillLegal(f, page);
+      }
+    } catch (err) {
+      if (err.status !== 401) notify(err.message, true);
+    }
+  }
+
+  for (const f of legalForms) {
+    f.addEventListener("input", () => { f.dataset.dirty = "1"; updateCount(f); });
+    part(f, "toggle").addEventListener("click", () => showPreview(f, part(f, "preview").hidden));
+    f.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const content = f.elements.content.value.trim();
+      const name = f.querySelector("h3").textContent;
+      showError(part(f, "error"), "");
+      if (!content && !part(f, "view").hidden) {
+        const ok = await confirmDialog("Take page offline?", "The " + name.toLowerCase() + " is removed from the status page and its text is deleted.");
+        if (!ok) return;
+      }
+      const submit = f.querySelector("button[type=submit]");
+      submit.disabled = true;
+      try {
+        const page = await api("PUT", "/api/admin/legal/" + f.dataset.kind, {
+          title: f.elements.title.value.trim() || null,
+          content: content || null,
+        });
+        fillLegal(f, page);
+        notify(page.content ? name + " saved" : name + " taken offline");
+      } catch (err) {
+        showError(part(f, "error"), err.message);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+
+  window.addEventListener("beforeunload", (event) => {
+    if (legalForms.some((f) => f.dataset.dirty)) event.preventDefault();
+  });
+
   // ---------- Boot ----------
   UI.setupThemeToggle($("theme-toggle"));
+  selectTab(location.hash.slice(1));
   (async () => {
     try {
       const me = await api("GET", "/api/auth/me");

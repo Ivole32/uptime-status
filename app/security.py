@@ -107,18 +107,21 @@ class OriginCheckMiddleware:
 
 
 class BodySizeLimitMiddleware:
-    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+    def __init__(self, app: ASGIApp, *, max_bytes: int, overrides: dict[str, int] | None = None) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        # Exact request paths that may send a different maximum.
+        self.overrides = overrides or {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        max_bytes = self.overrides.get(scope["path"], self.max_bytes)
         length = Headers(scope=scope).get("content-length")
         if length is not None:
             try:
-                too_big = int(length) > self.max_bytes
+                too_big = int(length) > max_bytes
             except ValueError:
                 too_big = True
             if too_big:
@@ -132,7 +135,7 @@ class BodySizeLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > max_bytes:
                     raise _BodyTooLarge
             return message
 

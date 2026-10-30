@@ -116,3 +116,14 @@ class SiteSetting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class LegalPage(Base):
+    """Imprint and privacy policy. A page exists publicly only while it has a row."""
+
+    __tablename__ = "legal_pages"
+
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(80))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

@@ -15,7 +15,11 @@ status, 90-day history, response times and incidents.
   per-service 90-day uptime bars with tooltips, 24h / 7d / 30d uptime, response time with a
   24h sparkline, service search, current and past incidents, light and dark theme.
 - Admin panel at `/admin`: add, edit, pause, delete monitors, trigger a check, view recent
-  checks, delete false-alarm incidents, set the page title and description.
+  checks, delete false-alarm incidents, set the page title and description, and write the
+  imprint and privacy policy.
+- Imprint (`/imprint`) and privacy policy (`/privacy`), linked in the footer once they have
+  text. They support a small Markdown subset: `# Heading`, `- list`, `1. list`, `**bold**` and
+  `[text](https://…)` links. HTML is shown as plain text.
 - Per-monitor check interval (10 s to 24 h) and timeout.
 - Monitors can be hidden from the public page, and the URL is only shown publicly if you allow it.
 - Raw checks are kept for 30 days (configurable). Daily rollups are kept indefinitely, so

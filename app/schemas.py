@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import (
@@ -149,3 +150,30 @@ class SiteSettingsIn(_Strict):
         if not self.title:
             raise ValueError("Title must not be empty")
         return self
+
+
+class LegalKind(StrEnum):
+    imprint = "imprint"
+    privacy = "privacy"
+
+
+LEGAL_DEFAULT_TITLES = {LegalKind.imprint: "Imprint", LegalKind.privacy: "Privacy policy"}
+LEGAL_MAX_CHARS = 100_000
+
+
+class LegalPageIn(_Strict):
+    # Empty or null content removes the page from the public site. It is required, so
+    # a request that leaves it out by mistake cannot delete the page.
+    title: str | None = Field(default=None, max_length=80)
+    content: str | None = Field(max_length=LEGAL_MAX_CHARS)
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, value: str | None) -> str | None:
+        value = _clean_text(value)
+        return " ".join(value.split()) if value else None
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, value: str | None) -> str | None:
+        return _clean_text(value)

@@ -45,10 +45,16 @@
   <main id="app-view" class="container" hidden>
     <section class="hero">
       <p class="hero-label s-operational">Dashboard</p>
-      <h1>Monitors</h1>
-      <p class="hero-desc">Add the domains you want to watch. Each one is requested on its own interval and its response time is recorded.</p>
+      <h1 id="view-title">Monitors</h1>
+      <p class="hero-desc" id="view-desc">Add the domains you want to watch. Each one is requested on its own interval and its response time is recorded.</p>
     </section>
 
+    <div class="tabs" role="tablist" aria-label="Dashboard">
+      <button class="tab" type="button" role="tab" id="tab-monitors" aria-controls="panel-monitors" aria-selected="true" data-tab="monitors">Monitors</button>
+      <button class="tab" type="button" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1" data-tab="settings">Settings</button>
+    </div>
+
+    <div id="panel-monitors" role="tabpanel" aria-labelledby="tab-monitors">
     <section class="section">
       <div class="section-head">
         <div><h2>Monitors</h2><p class="muted" id="monitor-count"></p></div>
@@ -71,7 +77,9 @@
         </table>
       </div>
     </section>
+    </div>
 
+    <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
     <section class="section">
       <div class="section-head"><div><h2>Page settings</h2><p class="muted">Shown at the top of the public status page.</p></div></div>
       <form id="settings-form" class="card settings-card" novalidate>
@@ -83,6 +91,42 @@
         <div class="form-actions"><button class="btn primary" type="submit">Save settings</button></div>
       </form>
     </section>
+
+    <section class="section">
+      <div class="section-head"><div><h2>Legal pages</h2><p class="muted">Linked in the footer of the status page. Leave the text empty to take a page offline.</p></div></div>
+      <p class="muted small legal-help">Formatting: a blank line starts a new paragraph, <code># Heading</code>, <code>- List item</code>, <code>1. Numbered item</code>, <code>**bold**</code>, <code>[link text](https://example.com)</code> or <code>[email](mailto:mail@example.com)</code>. HTML is shown as plain text.</p>
+      <div class="legal-forms">
+        <form class="card settings-card legal-form" data-kind="imprint" novalidate>
+          <div class="legal-form-head"><h3>Imprint</h3><span class="muted small" data-role="state"></span></div>
+          <div class="form-grid">
+            <label class="field full"><span>Title</span><input name="title" maxlength="80" placeholder="Imprint"><small>Shown as the page heading and footer link, for example “Impressum”</small></label>
+            <label class="field full" data-role="editor"><span>Text</span><textarea name="content" maxlength="100000" rows="12"></textarea><small data-role="count"></small></label>
+          </div>
+          <div class="legal-body legal-preview" data-role="preview" hidden></div>
+          <p class="error-box" role="alert" data-role="error" hidden></p>
+          <div class="form-actions">
+            <a class="btn" data-role="view" href="/imprint" target="_blank" rel="noopener" hidden>View page</a>
+            <button class="btn" type="button" data-role="toggle">Preview</button>
+            <button class="btn primary" type="submit">Save</button>
+          </div>
+        </form>
+        <form class="card settings-card legal-form" data-kind="privacy" novalidate>
+          <div class="legal-form-head"><h3>Privacy policy</h3><span class="muted small" data-role="state"></span></div>
+          <div class="form-grid">
+            <label class="field full"><span>Title</span><input name="title" maxlength="80" placeholder="Privacy policy"><small>Shown as the page heading and footer link, for example “Datenschutzerklärung”</small></label>
+            <label class="field full" data-role="editor"><span>Text</span><textarea name="content" maxlength="100000" rows="12"></textarea><small data-role="count"></small></label>
+          </div>
+          <div class="legal-body legal-preview" data-role="preview" hidden></div>
+          <p class="error-box" role="alert" data-role="error" hidden></p>
+          <div class="form-actions">
+            <a class="btn" data-role="view" href="/privacy" target="_blank" rel="noopener" hidden>View page</a>
+            <button class="btn" type="button" data-role="toggle">Preview</button>
+            <button class="btn primary" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    </div>
   </main>
 
   <!-- Monitor editor -->

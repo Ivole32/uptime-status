@@ -7,22 +7,30 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .config import get_settings
+from .db import get_db
+from .models import LegalPage
 from .routes import admin, auth, public
 from .scheduler import Scheduler
+from .schemas import LEGAL_MAX_CHARS, LegalKind
 from .security import BodySizeLimitMiddleware, OriginCheckMiddleware, SecurityHeadersMiddleware
 
 log = logging.getLogger("uptime")
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY_BYTES = 64 * 1024
+# Legal texts may be up to 100,000 characters. Worst case is a client escaping every one as a
+# surrogate pair (12 bytes). Only signed-in admins get this far: the route checks the
+# session before it reads the body.
+LEGAL_MAX_BODY_BYTES = LEGAL_MAX_CHARS * 12 + 4096
 
 
 class CachedStaticFiles(StaticFiles):
@@ -96,11 +104,30 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
         )
 
+    def legal_html(kind: LegalKind, db: Session) -> FileResponse:
+        # Unconfigured pages don't exist, rather than rendering an empty shell.
+        if db.get(LegalPage, kind.value) is None:
+            raise HTTPException(404, "Not Found")
+        return FileResponse(STATIC_DIR / "legal.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/imprint", include_in_schema=False)
+    def imprint_page(db: Session = Depends(get_db)) -> FileResponse:
+        return legal_html(LegalKind.imprint, db)
+
+    @app.get("/privacy", include_in_schema=False)
+    def privacy_page(db: Session = Depends(get_db)) -> FileResponse:
+        return legal_html(LegalKind.privacy, db)
+
     app.mount("/static", CachedStaticFiles(directory=STATIC_DIR), name="static")
 
     # Middleware runs bottom-up: the last added is the outermost.
     app.add_middleware(OriginCheckMiddleware)
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=MAX_BODY_BYTES,
+        # Exact paths only, so no other route can be sent the larger bodies.
+        overrides={f"/api/admin/legal/{kind.value}": LEGAL_MAX_BODY_BYTES for kind in LegalKind},
+    )
     if settings.allowed_hosts:
         # Loopback stays allowed so the container health check keeps working.
         hosts = [*settings.allowed_hosts, "127.0.0.1", "localhost"]

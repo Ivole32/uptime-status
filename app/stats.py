@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .db import utcnow
-from .models import Check, DailyStat, Incident, Monitor, SiteSetting
-from .schemas import iso_utc
+from .models import Check, DailyStat, Incident, LegalPage, Monitor, SiteSetting
+from .schemas import LEGAL_DEFAULT_TITLES, LegalKind, iso_utc
 
 HISTORY_DAYS = 90
 OVERALL_MONTHS = 12
@@ -56,6 +56,19 @@ def get_site_settings(db: Session) -> dict[str, str | None]:
         if row.key in values:
             values[row.key] = row.value or None
     return values
+
+
+def get_legal_pages(db: Session) -> dict[LegalKind, LegalPage]:
+    """Configured legal pages in display order (imprint first)."""
+    pages = {p.kind: p for p in db.scalars(select(LegalPage))}
+    return {kind: pages[kind.value] for kind in LegalKind if kind.value in pages}
+
+
+def legal_links(db: Session) -> list[dict[str, str]]:
+    return [
+        {"kind": kind.value, "title": page.title or LEGAL_DEFAULT_TITLES[kind]}
+        for kind, page in get_legal_pages(db).items()
+    ]
 
 
 def _pct(up: int, total: int) -> float | None:
@@ -218,6 +231,7 @@ def build_status(db: Session, settings: Settings) -> dict:
 
     return {
         "site": get_site_settings(db),
+        "legal": legal_links(db),
         "generated_at": iso_utc(now),
         "refresh_seconds": settings.public_refresh_seconds,
         "overall_status": _overall_status(list(statuses.values())),

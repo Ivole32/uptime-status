@@ -5,15 +5,26 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import require_admin
 from ..config import Settings, get_settings
-from ..db import get_db
-from ..models import Check, Incident, Monitor, SiteSetting
-from ..schemas import CheckOut, IncidentOut, MonitorIn, MonitorOut, SiteSettingsIn
-from ..stats import get_site_settings, status_cache
+from ..db import get_db, utcnow
+from ..models import AdminSession, Check, Incident, LegalPage, Monitor, SiteSetting
+from ..schemas import (
+    CheckOut,
+    IncidentOut,
+    LegalKind,
+    LegalPageIn,
+    MonitorIn,
+    MonitorOut,
+    SiteSettingsIn,
+    iso_utc,
+)
+from ..stats import get_legal_pages, get_site_settings, status_cache
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
@@ -172,3 +183,50 @@ def write_settings(body: SiteSettingsIn, db: Session = Depends(get_db)) -> dict:
     db.commit()
     status_cache.invalidate()
     return get_site_settings(db)
+
+
+def _legal_out(kind: LegalKind, page: LegalPage | None) -> dict:
+    return {
+        "kind": kind.value,
+        "title": page.title if page else None,
+        "content": page.content if page else None,
+        "updated_at": iso_utc(page.updated_at) if page else None,
+    }
+
+
+@router.get("/legal")
+def read_legal(response: Response, db: Session = Depends(get_db)) -> list[dict]:
+    _no_store(response)
+    pages = get_legal_pages(db)
+    return [_legal_out(kind, pages.get(kind)) for kind in LegalKind]
+
+
+async def legal_body(request: Request, _session: AdminSession = Depends(require_admin)) -> LegalPageIn:
+    """Parse the body only after the session and CSRF token are checked.
+
+    A declared body parameter would be read before any dependency runs, letting anonymous
+    clients make the server buffer bodies up to the larger limit of this route.
+    """
+    try:
+        return LegalPageIn.model_validate_json(await request.body())
+    except ValidationError as exc:
+        raise RequestValidationError([{**e, "loc": ("body", *e["loc"])} for e in exc.errors()]) from None
+
+
+@router.put("/legal/{kind}")
+def write_legal(
+    kind: LegalKind, body: LegalPageIn = Depends(legal_body), db: Session = Depends(get_db)
+) -> dict:
+    page = db.get(LegalPage, kind.value)
+    if body.content is None:
+        if page is not None:
+            db.delete(page)
+            page = None
+    elif page is None:
+        page = LegalPage(kind=kind.value, title=body.title, content=body.content)
+        db.add(page)
+    elif (page.title, page.content) != (body.title, body.content):
+        page.title, page.content, page.updated_at = body.title, body.content, utcnow()
+    db.commit()
+    status_cache.invalidate()
+    return _legal_out(kind, page)

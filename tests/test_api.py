@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import os
 from datetime import timedelta
 
@@ -8,7 +9,7 @@ from app.checker import ProbeResult
 from app.config import get_settings
 from app.db import SessionLocal, utcnow
 from app.main import app
-from app.models import AdminSession, DailyStat, Incident, Monitor
+from app.models import AdminSession, DailyStat, Incident, LegalPage, Monitor
 from app.scheduler import record_result
 
 from .conftest import CREDENTIALS_FILE, PASSWORD, USERNAME, write_credentials
@@ -524,3 +525,142 @@ def test_settings(admin):
     site = admin.get("/api/status").json()["site"]
     assert site == {"title": "Acme Status", "description": "All Acme services"}
     assert admin.put("/api/admin/settings", json={"title": ""}).status_code == 422
+
+
+IMPRINT = {"title": "Impressum", "content": "# Contact\nJane Doe\nMain Street 1\n\n- [Mail](mailto:jane@example.com)"}
+
+
+def test_legal_pages_absent_until_configured(client):
+    for path in ("/imprint", "/privacy", "/api/legal/imprint", "/api/legal/privacy"):
+        assert client.get(path).status_code == 404, path
+    assert client.get("/api/status").json()["legal"] == []
+
+
+def test_legal_admin_requires_login_and_csrf(client, admin):
+    with TestClient(app) as anonymous:
+        assert anonymous.get("/api/admin/legal").status_code == 401
+        assert anonymous.put("/api/admin/legal/imprint", json=IMPRINT).status_code == 401
+    token = admin.headers.pop("X-CSRF-Token")
+    assert admin.put("/api/admin/legal/imprint", json=IMPRINT).status_code == 403
+    res = admin.put("/api/admin/legal/imprint", json=IMPRINT, headers={"X-CSRF-Token": token, "Origin": "https://evil.example"})
+    assert res.status_code == 403
+    assert client.get("/api/legal/imprint").status_code == 404
+
+
+def test_legal_page_lifecycle(admin):
+    assert [p["content"] for p in admin.get("/api/admin/legal").json()] == [None, None]
+    res = admin.put("/api/admin/legal/imprint", json=IMPRINT)
+    assert res.status_code == 200, res.text
+    saved = res.json()
+    assert saved["content"] == IMPRINT["content"] and saved["updated_at"].endswith("Z")
+
+    page = admin.get("/api/legal/imprint")
+    assert page.status_code == 200 and page.headers["content-type"] == "application/json"
+    assert page.json()["title"] == "Impressum" and page.json()["content"] == IMPRINT["content"]
+    html = admin.get("/imprint")
+    assert html.status_code == 200 and "text/html" in html.headers["content-type"]
+    assert "unsafe-inline" not in html.headers["content-security-policy"]
+    assert admin.get("/privacy").status_code == 404
+    assert admin.get("/api/status").json()["legal"] == [{"kind": "imprint", "title": "Impressum"}]
+
+    # Saving unchanged text keeps the date; no title falls back to the default.
+    with SessionLocal() as db:
+        db.get(LegalPage, "imprint").updated_at = utcnow() - timedelta(days=3)
+        db.commit()
+    unchanged = admin.put("/api/admin/legal/imprint", json=IMPRINT).json()
+    assert unchanged["updated_at"] < saved["updated_at"]
+    admin.put("/api/admin/legal/privacy", json={"content": "We store nothing."})
+    assert admin.get("/api/status").json()["legal"] == [
+        {"kind": "imprint", "title": "Impressum"},
+        {"kind": "privacy", "title": "Privacy policy"},
+    ]
+
+    # Empty text takes the page offline.
+    gone = admin.put("/api/admin/legal/imprint", json={"title": "Impressum", "content": "  \n "})
+    assert gone.status_code == 200 and gone.json()["content"] is None
+    assert admin.get("/imprint").status_code == 404 and admin.get("/api/legal/imprint").status_code == 404
+    assert admin.put("/api/admin/legal/imprint", json={"content": None}).status_code == 200
+
+
+def test_legal_content_is_cleaned_not_interpreted(admin):
+    content = "Line\r\nNext\x00\x07 <script>alert(1)</script> [x](javascript:alert(1))"
+    res = admin.put("/api/admin/legal/privacy", json={"title": "  Daten\n\tschutz  ", "content": content})
+    body = res.json()
+    assert body["title"] == "Daten schutz"
+    # Stored as text: control characters dropped, markup kept verbatim for the client to show as text.
+    assert body["content"] == "Line\nNext <script>alert(1)</script> [x](javascript:alert(1))"
+    page = admin.get("/api/legal/privacy")
+    assert page.headers["x-content-type-options"] == "nosniff"
+    assert "<script>" not in admin.get("/privacy").text
+
+
+def test_legal_validation_and_size_limits(admin):
+    assert admin.put("/api/admin/legal/terms", json=IMPRINT).status_code == 422
+    assert admin.get("/api/legal/terms").status_code == 422
+    assert admin.get("/terms").status_code == 404
+    assert admin.put("/api/admin/legal/imprint", json={**IMPRINT, "extra": 1}).status_code == 422
+    assert admin.put("/api/admin/legal/imprint", json={**IMPRINT, "title": "x" * 81}).status_code == 422
+    assert admin.put("/api/admin/legal/imprint", json={"content": "x" * 100_001}).status_code == 422
+    # The full length fits, even as multi-byte text well above the normal body limit.
+    long_text = "ä" * 100_000
+    assert admin.put("/api/admin/legal/imprint", json={"content": long_text}).status_code == 200
+    assert admin.get("/api/legal/imprint").json()["content"] == long_text
+    # Clients that escape non-ASCII (Python's json.dumps) send up to 12 bytes per character.
+    for char in ("ä", "😀"):
+        escaped = json.dumps({"content": char * 100_000})
+        res = admin.put("/api/admin/legal/imprint", content=escaped, headers={"Content-Type": "application/json"})
+        assert res.status_code == 200 and len(res.json()["content"]) == 100_000
+    assert admin.put("/api/admin/legal/imprint", json={"content": "x" * 1_300_000}).status_code == 413
+    too_long = admin.put("/api/admin/legal/imprint", json={"content": "x" * 100_001})
+    assert too_long.status_code == 422 and too_long.json()["errors"][0]["field"] == "content"
+    # The larger limit applies to these exact paths only.
+    assert admin.put("/api/admin/settings", json={"title": "x", "description": "x" * 70_000}).status_code == 413
+    assert admin.put("/api/admin/legal/imprint/", json={"content": "x" * 70_000}).status_code == 413
+
+
+def test_legal_content_is_required(admin):
+    admin.put("/api/admin/legal/imprint", json=IMPRINT)
+    res = admin.put("/api/admin/legal/imprint", json={"title": "Impressum"})
+    assert res.status_code == 422 and res.json()["errors"][0]["field"] == "content"
+    assert admin.get("/api/legal/imprint").status_code == 200  # a missing field never deletes
+    assert admin.put("/api/admin/legal/imprint", content=b"not json", headers={"Content-Type": "application/json"}).status_code == 422
+
+
+def _raw_put_legal(headers: list[tuple[bytes, bytes]]) -> tuple[int, int]:
+    """Send a request straight to the ASGI app; return (status, body reads)."""
+    import anyio
+
+    body = b'{"content": "x"}'
+    reads = 0
+    sent = []
+
+    async def receive():
+        nonlocal reads
+        reads += 1
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    path = "/api/admin/legal/imprint"
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "PUT",
+        "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": b"", "root_path": "",
+        "headers": [(b"host", b"testserver"), (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()), *headers],
+        "client": ("127.0.0.1", 1), "server": ("testserver", 80),
+    }
+    anyio.run(app, scope, receive, send)
+    return sent[0]["status"], reads
+
+
+def test_legal_body_read_only_after_auth(admin):
+    # Anonymous requests are refused before the (larger) body is read at all.
+    assert _raw_put_legal([]) == (401, 0)
+    token = admin.cookies.get("uptime_session")
+    forged = [(b"cookie", f"uptime_session={token}".encode()), (b"x-csrf-token", b"forged")]
+    assert _raw_put_legal(forged) == (403, 0)
+    valid = [(b"cookie", f"uptime_session={token}".encode()),
+             (b"x-csrf-token", admin.headers["X-CSRF-Token"].encode())]
+    status, reads = _raw_put_legal(valid)
+    assert status == 200 and reads >= 1

@@ -127,5 +127,84 @@ const UI = (() => {
     return "down";
   }
 
-  return { h, svg, icon, setupThemeToggle, fmtDateTime, fmtTime, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDuration, fmtRelative, fmtInterval, level };
+  // ---------- Legal pages ----------
+  const LEGAL_PATHS = { imprint: "/imprint", privacy: "/privacy" };
+  const LINK_PROTOCOLS = ["https:", "http:", "mailto:", "tel:"];
+
+  // Footer links to the configured legal pages; the paths are ours, never taken from the API.
+  function renderLegalLinks(container, pages) {
+    if (!container) return;
+    const links = (pages || []).filter((p) => LEGAL_PATHS[p.kind]).map((p) => h("a", { href: LEGAL_PATHS[p.kind], text: p.title }));
+    container.replaceChildren(...links);
+    container.hidden = !links.length;
+  }
+
+  function safeUrl(raw) {
+    let url;
+    try { url = new URL(raw, window.location.origin); } catch (e) { return null; }
+    return LINK_PROTOCOLS.includes(url.protocol) ? url : null;
+  }
+
+  // Inline markup: **bold** and [text](url). The character classes stop at the next
+  // delimiter, so matching stays linear even on hostile input.
+  const INLINE = /\*\*([^*]+)\*\*|\[([^[\]]+)\]\(([^()\s]+)\)/g;
+
+  function inline(text) {
+    const out = [];
+    let last = 0;
+    for (const m of text.matchAll(INLINE)) {
+      if (m.index > last) out.push(text.slice(last, m.index));
+      if (m[1] !== undefined) {
+        out.push(h("strong", {}, inline(m[1])));
+      } else {
+        const url = safeUrl(m[3]);
+        if (!url) {
+          out.push(m[0]); // unsupported scheme: show the source text, never a link
+        } else {
+          const external = /^https?:$/.test(url.protocol) && url.origin !== window.location.origin;
+          out.push(h("a", external
+            ? { href: url.href, text: m[2], target: "_blank", rel: "noopener noreferrer" }
+            : { href: url.href, text: m[2] }));
+        }
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out;
+  }
+
+  // A small Markdown subset for legal texts, built as DOM nodes. Nothing is ever parsed
+  // as HTML, so tags in the text show up literally.
+  function renderRichText(source) {
+    const blocks = [];
+    let para = null;
+    let list = null;
+    for (const raw of String(source || "").split("\n")) {
+      const line = raw.trim();
+      let m;
+      if (!line) {
+        para = list = null;
+      } else if ((m = /^(#{1,3}) (.+)$/.exec(line))) {
+        para = list = null;
+        blocks.push(h("h" + (m[1].length + 1), {}, inline(m[2])));
+      } else if ((m = /^(?:([-*])|(\d{1,9})[.)]) (.+)$/.exec(line))) {
+        para = null;
+        const tag = m[1] ? "ul" : "ol";
+        if (!list || list.tagName.toLowerCase() !== tag) {
+          list = h(tag, tag === "ol" && m[2] !== "1" ? { start: String(parseInt(m[2], 10)) } : {});
+          blocks.push(list);
+        }
+        list.append(h("li", {}, inline(m[3])));
+      } else if (para) {
+        para.append(h("br"), ...inline(line));
+      } else {
+        list = null;
+        para = h("p", {}, inline(line));
+        blocks.push(para);
+      }
+    }
+    return blocks;
+  }
+
+  return { h, svg, icon, setupThemeToggle, fmtDateTime, fmtTime, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDuration, fmtRelative, fmtInterval, level, renderLegalLinks, renderRichText };
 })();

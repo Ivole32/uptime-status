@@ -78,6 +78,7 @@
     const desc = $("site-description");
     desc.textContent = data.site.description || "";
     desc.hidden = !data.site.description;
+    UI.renderLegalLinks($("legal-links"), data.legal);
   }
 
   // ---------- Overall month view ----------
