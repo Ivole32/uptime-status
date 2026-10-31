@@ -2,7 +2,7 @@
 "use strict";
 
 (() => {
-  const { h, svg, icon, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDateTime, fmtDuration, fmtTime, level } = UI;
+  const { h, svg, icon, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDateTime, fmtDuration, fmtTime, level, statusTag, incidentTitle } = UI;
   const $ = (id) => document.getElementById(id);
 
   const HERO = {
@@ -189,17 +189,31 @@
   }
 
   // ---------- Incidents ----------
+  // Update text for a one-line preview; the card is a link, so it holds no links itself.
+  const plainText = (md) => md
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\[([^[\]]+)\]\(([^()\s]+)\)/g, "$1")
+    .replace(/^\s*(#{1,3}|[-*]|\d{1,9}[.)]) /gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
   function incidentCard(inc, active) {
     const slow = inc.kind === "degraded";
-    const meta = active
+    const when = active
       ? (slow ? "Slow since " : "Down since ") + fmtDateTime(inc.started_at) + " · " + fmtDuration(inc.started_at, null)
       : fmtDateTime(inc.started_at) + " – " + fmtTime(inc.resolved_at) + " · " + fmtDuration(inc.started_at, inc.resolved_at);
-    const title = slow ? (active ? " has elevated latency" : " had elevated latency") : (active ? " is down" : " was down");
-    return h("div", { class: "card incident" + (active ? " active" : "") + (slow ? " degraded" : "") },
+    const meta = [inc.title ? inc.monitor_name : null, when, inc.error].filter(Boolean).join(" · ");
+    const latest = inc.latest_update;
+    return h("a", { class: "card incident" + (active ? " active" : "") + (slow ? " degraded" : ""), href: "/incidents/" + inc.id },
       h("div", { class: "incident-top" },
-        h("span", { class: "incident-title", text: inc.monitor_name + title }),
-        h("span", { class: "badge " + (active ? (slow ? "degraded" : "down") : "up"), text: active ? "Ongoing" : "Resolved" })),
-      h("p", { class: "incident-meta", text: meta + (inc.error ? " · " + inc.error : "") }));
+        h("span", { class: "incident-title", text: incidentTitle(inc) }),
+        h("span", { class: "tags" },
+          inc.has_postmortem ? h("span", { class: "badge", text: "Post-mortem" }) : null,
+          h("span", { class: "badge " + (active ? (slow ? "degraded" : "down") : "up"), text: active ? "Ongoing" : "Resolved" }))),
+      h("p", { class: "incident-meta", text: meta }),
+      latest
+        ? h("p", { class: "incident-latest" }, statusTag(latest.status), " ", h("span", { text: plainText(latest.message) }))
+        : null);
   }
 
   function renderIncidents() {

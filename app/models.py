@@ -98,6 +98,32 @@ class Incident(Base):
     # "down" (checks fail) or "degraded" (checks pass, but much slower than usual).
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="down", server_default="down")
     error: Mapped[str | None] = mapped_column(String(200))
+    # Written by the admin. An incident with any of this is never pruned automatically.
+    title: Mapped[str | None] = mapped_column(String(120))
+    postmortem: Mapped[str | None] = mapped_column(Text)
+    postmortem_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    updates: Mapped[list[IncidentUpdate]] = relationship(
+        back_populates="incident", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class IncidentUpdate(Base):
+    """A message to visitors about an incident, tagged with where the work stands."""
+
+    __tablename__ = "incident_updates"
+    __table_args__ = (Index("ix_incident_updates_incident_created", "incident_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    incident_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False
+    )
+    # investigating, identified, monitoring, update or resolved
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    incident: Mapped[Incident] = relationship(back_populates="updates")
 
 
 class AdminSession(Base):

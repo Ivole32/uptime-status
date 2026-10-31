@@ -23,6 +23,7 @@ from .routes import admin, auth, public
 from .scheduler import Scheduler
 from .schemas import LEGAL_MAX_CHARS, LegalKind
 from .security import BodySizeLimitMiddleware, OriginCheckMiddleware, SecurityHeadersMiddleware
+from .stats import get_public_incident
 
 log = logging.getLogger("uptime")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -117,6 +118,16 @@ def create_app() -> FastAPI:
     @app.get("/privacy", include_in_schema=False)
     def privacy_page(db: Session = Depends(get_db)) -> FileResponse:
         return legal_html(LegalKind.privacy, db)
+
+    @app.get("/incidents/{incident_id}", include_in_schema=False)
+    def incident_page(incident_id: str, db: Session = Depends(get_db)) -> FileResponse:
+        # Taken as text so a malformed ID is a plain 404 like any unknown page, not a 422.
+        valid = incident_id.isascii() and incident_id.isdigit() and len(incident_id) <= 10
+        if not (valid and 0 < int(incident_id) < 2**31):
+            raise HTTPException(404, "Not Found")
+        if get_public_incident(db, int(incident_id)) is None:
+            raise HTTPException(404, "Not Found")
+        return FileResponse(STATIC_DIR / "incident.html", headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", CachedStaticFiles(directory=STATIC_DIR), name="static")
 

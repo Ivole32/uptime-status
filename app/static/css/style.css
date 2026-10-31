@@ -172,19 +172,57 @@ textarea { resize: vertical; min-height: 70px; }
 .badge.down { background: var(--down-soft); color: var(--down); }
 .badge.degraded,
 .badge.paused { background: var(--warn-soft); color: var(--warn); }
+.badge.info { background: color-mix(in srgb, var(--focus) 15%, transparent); color: var(--focus); }
+.tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .empty { padding: 28px 22px; text-align: center; color: var(--muted); }
 
 /* ---- Incidents ---- */
 .incident-group + .incident-group { margin-top: 22px; }
 .incident-group h3 { font-size: 0.9rem; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
-.incident { padding: 16px 20px; border-left: 3px solid var(--up); }
+.incident { display: block; padding: 16px 20px; border-left: 3px solid var(--up); text-decoration: none; color: inherit; }
+a.incident:hover { color: inherit; background: var(--surface-2); }
+a.incident:hover .incident-title { color: var(--accent); }
+.subhead > .incident + .incident { margin-top: 10px; }
 .incident.active { border-left-color: var(--down); }
 .incident.active.degraded { border-left-color: var(--warn); }
 .incident-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .incident-title { font-weight: 600; }
 .incident-meta { color: var(--muted); font-size: 0.86rem; margin-top: 4px; }
+.incident-latest { margin-top: 8px; font-size: 0.88rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .subhead { margin: 28px 0 14px; }
+
+/* ---- Incident page ---- */
+.incident-page { padding: 40px 0 0; }
+.back-link { display: block; width: fit-content; color: var(--muted); text-decoration: none; font-size: 0.9rem; margin-bottom: 20px; }
+.incident-page h1 { font-size: clamp(1.7rem, 5vw, 2.4rem); font-weight: 750; letter-spacing: -0.02em; margin-top: 12px; overflow-wrap: anywhere; }
+.incident-facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 0 36px; color: var(--muted); font-size: 0.9rem; }
+.incident-facts b { color: var(--text); font-weight: 600; }
+.incident-page .section h2 { margin-bottom: 14px; }
+#postmortem-date { margin: -8px 0 12px; }
+.postmortem-card { padding: 20px 22px; }
+.postmortem-card .legal-body { margin-top: 0; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 20px; border-left: 2px solid var(--border); }
+.timeline-item { position: relative; padding-bottom: 26px; }
+.timeline-item:last-child { padding-bottom: 0; }
+.timeline-item::before { content: ""; position: absolute; left: -27px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--muted); }
+.timeline-item.recorded::before { border-color: var(--border); }
+.timeline-item .muted:not(.small) { margin-top: 6px; font-size: 0.92rem; }
+.update-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.legal-body.update-body { margin-top: 8px; }
+
+/* ---- Incident editor (admin) ---- */
+dialog.wide { width: min(760px, calc(100vw - 32px)); }
+.dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.dialog-head h2 { margin-bottom: 4px; overflow-wrap: anywhere; }
+.dialog-section { border-top: 1px solid var(--border); padding-top: 18px; margin-top: 18px; }
+.dialog-section > h3 { margin-bottom: 12px; }
+.dialog-section .legal-help { margin: 10px 0 0; }
+.update-list { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow: auto; }
+.update-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.update-item.editing { border-color: var(--focus); }
+.update-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+td .tags { margin-top: 6px; display: flex; }
 
 /* ---- Tooltip ---- */
 .tooltip { position: fixed; z-index: 50; pointer-events: none; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.8rem; line-height: 1.45; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); max-width: 220px; }

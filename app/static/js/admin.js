@@ -2,7 +2,7 @@
 "use strict";
 
 (() => {
-  const { h, fmtDateTime, fmtRelative, fmtMs, fmtInterval, fmtDuration } = UI;
+  const { h, fmtDateTime, fmtRelative, fmtMs, fmtInterval, fmtDuration, statusTag, incidentTitle } = UI;
   const $ = (id) => document.getElementById(id);
 
   let csrfToken = null;
@@ -68,7 +68,8 @@
     await Promise.all([loadMonitors(), loadIncidents(), loadSettings(), loadLegal()]);
     clearInterval(refreshTimer);
     refreshTimer = setInterval(() => {
-      if (!document.hidden && !$("monitor-dialog").open && currentTab === "monitors") { loadMonitors(); loadIncidents(); }
+      const editing = $("monitor-dialog").open || $("incident-dialog").open;
+      if (!document.hidden && !editing && currentTab === "monitors") { loadMonitors(); loadIncidents(); }
     }, 15000);
   }
 
@@ -267,10 +268,11 @@
   $("add-btn").addEventListener("click", () => openEditor(null));
 
   // ---------- Confirm ----------
-  function confirmDialog(title, text) {
+  function confirmDialog(title, text, okLabel = "Delete") {
     const d = $("confirm-dialog");
     $("confirm-title").textContent = title;
     $("confirm-text").textContent = text;
+    $("confirm-ok").textContent = okLabel;
     return new Promise((resolve) => {
       const done = (value) => {
         d.close();
@@ -299,11 +301,21 @@
       }
       body.replaceChildren(...incidents.map((inc) =>
         h("tr", {},
-          h("td", {}, h("strong", { text: inc.monitor_name }), inc.resolved_at ? null : h("span", { class: "badge " + (inc.kind === "degraded" ? "degraded" : "down"), text: "Ongoing" })),
+          h("td", {},
+            h("strong", { text: inc.monitor_name }),
+            inc.resolved_at ? null : h("span", { class: "badge " + (inc.kind === "degraded" ? "degraded" : "down"), text: "Ongoing" }),
+            inc.title ? h("span", { class: "target", text: inc.title }) : null,
+            inc.update_count || inc.has_postmortem
+              ? h("span", { class: "tags" },
+                  inc.latest_status ? statusTag(inc.latest_status) : null,
+                  inc.update_count ? h("span", { class: "small muted", text: inc.update_count + (inc.update_count === 1 ? " update" : " updates") }) : null,
+                  inc.has_postmortem ? h("span", { class: "badge", text: "Post-mortem" }) : null)
+              : null),
           h("td", { text: fmtDateTime(inc.started_at) }),
           h("td", { text: fmtDuration(inc.started_at, inc.resolved_at) }),
           h("td", { text: inc.error || "—" }),
           h("td", { class: "actions" },
+            h("button", { class: "btn sm", type: "button", text: "Updates", onclick: () => openIncident(inc.id) }),
             h("button", { class: "btn sm danger", type: "button", text: "Delete", onclick: () => deleteIncident(inc) })))));
     } catch (err) {
       if (err.status !== 401) notify(err.message, true);
@@ -311,13 +323,164 @@
   }
 
   async function deleteIncident(inc) {
-    const ok = await confirmDialog("Delete incident?", "The incident for “" + inc.monitor_name + "” will be removed from the public history. Uptime statistics are not changed.");
+    const written = inc.update_count || inc.has_postmortem ? " Its updates and post-mortem are deleted with it." : "";
+    const ok = await confirmDialog("Delete incident?", "The incident for “" + inc.monitor_name + "” will be removed from the public history." + written + " Uptime statistics are not changed.");
     if (!ok) return;
     try {
       await api("DELETE", "/api/admin/incidents/" + inc.id);
       loadIncidents();
     } catch (err) { notify(err.message, true); }
   }
+
+  // ---------- Incident updates and post-mortem ----------
+  const incidentDialog = $("incident-dialog");
+  const updateForm = $("update-form");
+  const incidentForm = $("incident-form");
+  let incident = null;
+  let editingUpdateId = null;
+
+  async function openIncident(id) {
+    try {
+      incident = await api("GET", "/api/admin/incidents/" + id);
+    } catch (err) {
+      notify(err.message, true);
+      return;
+    }
+    resetUpdateForm();
+    fillIncidentForm();
+    renderIncident();
+    incidentDialog.showModal();
+    updateForm.elements.message.focus();
+  }
+
+  function renderIncident() {
+    const inc = incident;
+    $("incident-dialog-title").textContent = incidentTitle(inc);
+    const what = inc.kind === "degraded" ? "Elevated latency" : "Outage";
+    const when = inc.resolved_at
+      ? fmtDateTime(inc.started_at) + " – " + fmtDateTime(inc.resolved_at)
+      : "Ongoing since " + fmtDateTime(inc.started_at);
+    $("incident-summary").textContent = [inc.monitor_name, what, when, fmtDuration(inc.started_at, inc.resolved_at), inc.error].filter(Boolean).join(" · ");
+    const view = $("incident-view");
+    view.hidden = !inc.monitor_public;
+    view.href = "/incidents/" + inc.id;
+    $("incident-title-hint").textContent = "Leave empty to show “" + incidentTitle({ ...inc, title: null }) + "”";
+
+    $("update-list").replaceChildren(...(inc.updates.length
+      ? inc.updates.map((u) => h("article", { class: "update-item" + (u.id === editingUpdateId ? " editing" : "") },
+          h("div", { class: "update-head" },
+            statusTag(u.status),
+            h("span", { class: "muted small", text: fmtDateTime(u.created_at) }),
+            h("span", { class: "update-actions" },
+              h("button", { class: "btn sm", type: "button", text: "Edit", onclick: () => editUpdate(u) }),
+              h("button", { class: "btn sm danger", type: "button", text: "Delete", onclick: () => deleteUpdate(u) }))),
+          h("div", { class: "legal-body update-body" }, UI.renderRichText(u.message))))
+      : [h("p", { class: "muted small", text: "No updates yet. Visitors only see what monitoring recorded." })]));
+  }
+
+  function resetUpdateForm() {
+    editingUpdateId = null;
+    updateForm.reset();
+    // Most updates keep the stage of the last one, so start from there.
+    updateForm.elements.status.value = incident && incident.updates.length ? incident.updates[0].status : "investigating";
+    updateForm.dataset.dirty = "";
+    $("update-form-title").textContent = "Post an update";
+    updateForm.querySelector("button[type=submit]").textContent = "Post update";
+    $("update-cancel").hidden = true;
+    showError($("update-error"), "");
+  }
+
+  function fillIncidentForm() {
+    incidentForm.elements.title.value = incident.title || "";
+    incidentForm.elements.postmortem.value = incident.postmortem || "";
+    incidentForm.dataset.dirty = "";
+    showError($("incident-error"), "");
+  }
+
+  function editUpdate(u) {
+    editingUpdateId = u.id;
+    updateForm.elements.status.value = u.status;
+    updateForm.elements.message.value = u.message;
+    updateForm.dataset.dirty = "";
+    $("update-form-title").textContent = "Edit update from " + fmtDateTime(u.created_at);
+    updateForm.querySelector("button[type=submit]").textContent = "Save update";
+    $("update-cancel").hidden = false;
+    showError($("update-error"), "");
+    renderIncident();
+    updateForm.elements.message.focus();
+  }
+
+  async function deleteUpdate(u) {
+    const ok = await confirmDialog("Delete update?", "This message is removed from the incident page.");
+    if (!ok) return;
+    try {
+      await api("DELETE", "/api/admin/incidents/" + incident.id + "/updates/" + u.id);
+      incident = await api("GET", "/api/admin/incidents/" + incident.id);
+      if (editingUpdateId === u.id) resetUpdateForm();
+      renderIncident();
+      notify("Update deleted");
+    } catch (err) { notify(err.message, true); }
+  }
+
+  updateForm.addEventListener("input", () => { updateForm.dataset.dirty = "1"; });
+  incidentForm.addEventListener("input", () => { incidentForm.dataset.dirty = "1"; });
+  $("update-cancel").addEventListener("click", () => { resetUpdateForm(); renderIncident(); });
+
+  updateForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = { status: updateForm.elements.status.value, message: updateForm.elements.message.value.trim() };
+    if (!body.message) {
+      showError($("update-error"), "Write a message for your visitors.");
+      return;
+    }
+    const submit = updateForm.querySelector("button[type=submit]");
+    submit.disabled = true;
+    showError($("update-error"), "");
+    try {
+      const base = "/api/admin/incidents/" + incident.id + "/updates";
+      const edited = editingUpdateId !== null;
+      incident = edited ? await api("PUT", base + "/" + editingUpdateId, body) : await api("POST", base, body);
+      resetUpdateForm();
+      renderIncident();
+      notify(edited ? "Update saved" : "Update posted");
+    } catch (err) {
+      showError($("update-error"), err.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  incidentForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = incidentForm.querySelector("button[type=submit]");
+    submit.disabled = true;
+    showError($("incident-error"), "");
+    try {
+      incident = await api("PUT", "/api/admin/incidents/" + incident.id, {
+        title: incidentForm.elements.title.value.trim() || null,
+        postmortem: incidentForm.elements.postmortem.value.trim() || null,
+      });
+      fillIncidentForm();
+      renderIncident();
+      notify("Saved");
+    } catch (err) {
+      showError($("incident-error"), err.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  async function closeIncident() {
+    if (updateForm.dataset.dirty || incidentForm.dataset.dirty) {
+      const ok = await confirmDialog("Discard changes?", "You have text that is not saved yet.", "Discard");
+      if (!ok) return;
+    }
+    incidentDialog.close();
+    loadIncidents();
+  }
+
+  $("incident-close").addEventListener("click", closeIncident);
+  incidentDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeIncident(); });
 
   // ---------- Settings ----------
   async function loadSettings() {
@@ -419,7 +582,8 @@
   }
 
   window.addEventListener("beforeunload", (event) => {
-    if (legalForms.some((f) => f.dataset.dirty)) event.preventDefault();
+    const incidentDirty = incidentDialog.open && (updateForm.dataset.dirty || incidentForm.dataset.dirty);
+    if (incidentDirty || legalForms.some((f) => f.dataset.dirty)) event.preventDefault();
   });
 
   // ---------- Boot ----------

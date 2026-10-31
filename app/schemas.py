@@ -126,6 +126,19 @@ class CheckOut(BaseModel):
     error: str | None
 
 
+class IncidentStatus(StrEnum):
+    investigating = "investigating"
+    identified = "identified"
+    monitoring = "monitoring"
+    update = "update"
+    resolved = "resolved"
+
+
+INCIDENT_MESSAGE_MAX_CHARS = 5_000
+# Kept small enough that even text of three-byte characters fits the default body limit.
+POSTMORTEM_MAX_CHARS = 20_000
+
+
 class IncidentOut(BaseModel):
     id: int
     monitor_id: int
@@ -134,6 +147,68 @@ class IncidentOut(BaseModel):
     resolved_at: UTCDateTime | None
     kind: str
     error: str | None
+    title: str | None
+    update_count: int
+    latest_status: IncidentStatus | None
+    has_postmortem: bool
+
+
+class IncidentUpdateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    status: IncidentStatus
+    message: str
+    created_at: UTCDateTime
+
+
+class IncidentDetailOut(BaseModel):
+    id: int
+    monitor_id: int
+    monitor_name: str
+    monitor_public: bool
+    started_at: UTCDateTime
+    resolved_at: UTCDateTime | None
+    kind: str
+    error: str | None
+    title: str | None
+    postmortem: str | None
+    postmortem_at: UTCDateTime | None
+    updates: list[IncidentUpdateOut]
+
+
+class IncidentUpdateIn(_Strict):
+    status: IncidentStatus
+    message: str = Field(min_length=1, max_length=INCIDENT_MESSAGE_MAX_CHARS)
+
+    @field_validator("message")
+    @classmethod
+    def _message(cls, value: str) -> str | None:
+        return _clean_text(value)
+
+    @model_validator(mode="after")
+    def _message_required(self) -> IncidentUpdateIn:
+        if not self.message:
+            raise ValueError("Message must not be empty")
+        return self
+
+
+class IncidentIn(_Strict):
+    # Both are required so a request that leaves one out by mistake cannot clear it.
+    # Null or empty removes it: the generated title is shown, the post-mortem is gone.
+    title: str | None = Field(max_length=120)
+    postmortem: str | None = Field(max_length=POSTMORTEM_MAX_CHARS)
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, value: str | None) -> str | None:
+        value = _clean_text(value)
+        return " ".join(value.split()) if value else None
+
+    @field_validator("postmortem")
+    @classmethod
+    def _postmortem(cls, value: str | None) -> str | None:
+        return _clean_text(value)
 
 
 class SiteSettingsIn(_Strict):

@@ -15,10 +15,15 @@ status, 90-day history, response times and incidents.
   per-service 90-day uptime bars with tooltips, 24h / 7d / 30d uptime, response time with a
   24h sparkline, service search, current and past incidents, light and dark theme.
 - Admin panel at `/admin`: add, edit, pause, delete monitors, trigger a check, view recent
-  checks, delete false-alarm incidents, set the page title and description, and write the
-  imprint and privacy policy.
+  checks, post incident updates and post-mortems, delete false-alarm incidents, set the page
+  title and description, and write the imprint and privacy policy.
+- Incident updates: each incident has a public page at `/incidents/<id>`, linked from the status
+  page. Post updates tagged *Investigating*, *Identified*, *Monitoring*, *Update* or *Resolved*,
+  give the incident a title, and add a post-mortem. The tags are for your visitors only: whether
+  an incident is ongoing still follows the checks. Resolved incidents are pruned after 400 days,
+  except those you wrote a title, update or post-mortem for, which are kept.
 - Imprint (`/imprint`) and privacy policy (`/privacy`), linked in the footer once they have
-  text. They support a small Markdown subset: `# Heading`, `- list`, `1. list`, `**bold**` and
+  text. They, incident updates and post-mortems support a small Markdown subset: `# Heading`, `- list`, `1. list`, `**bold**` and
   `[text](https://…)` links. HTML is shown as plain text.
 - Per-monitor check interval (10 s to 24 h) and timeout.
 - Monitors can be hidden from the public page, and the URL is only shown publicly if you allow it.

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incident</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="/static/js/theme.js"></script>
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/incident.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/"><img class="brand-mark" src="/static/favicon.svg" alt="" width="22" height="22"><span id="site-title">Status</span></a>
+      <nav class="nav" aria-label="Sections">
+        <a href="/">Status</a>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"></button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="incident-page" aria-live="polite">
+      <a class="back-link" href="/#incidents">← All incidents</a>
+      <div class="tags" id="incident-tags"></div>
+      <h1 id="incident-title">Loading…</h1>
+      <p class="incident-facts" id="incident-facts"></p>
+
+      <section class="section" id="postmortem" aria-labelledby="postmortem-heading" hidden>
+        <h2 id="postmortem-heading">Post-mortem</h2>
+        <p class="muted small" id="postmortem-date"></p>
+        <div class="card postmortem-card"><div class="legal-body" id="postmortem-body"></div></div>
+      </section>
+
+      <section class="section" aria-labelledby="updates-heading">
+        <h2 id="updates-heading">Updates</h2>
+        <ol class="timeline" id="timeline"></ol>
+      </section>
+      <noscript><p class="muted">This page needs JavaScript.</p></noscript>
+    </article>
+  </main>
+
+  <footer class="container footer">
+    <span>Times shown in your local time zone.</span>
+    <nav class="footer-links" id="legal-links" aria-label="Legal" hidden></nav>
+    <span>Powered by Uptime Status</span>
+  </footer>
+</body>
+</html>

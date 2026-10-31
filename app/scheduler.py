@@ -8,13 +8,13 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.orm import Session
 
 from .checker import ProbeResult, probe
 from .config import Settings, get_settings
 from .db import session_scope, utcnow
-from .models import AdminSession, Check, DailyStat, Incident, Monitor
+from .models import AdminSession, Check, DailyStat, Incident, IncidentUpdate, Monitor
 
 log = logging.getLogger("uptime.scheduler")
 
@@ -135,7 +135,15 @@ def run_maintenance(settings: Settings) -> None:
     with session_scope() as db:
         db.execute(delete(Check).where(Check.checked_at < now - timedelta(days=settings.raw_retention_days)))
         db.execute(delete(AdminSession).where(AdminSession.expires_at <= now))
-        db.execute(delete(Incident).where(Incident.resolved_at < now - INCIDENT_RETENTION))
+        # Incidents the admin wrote updates or a post-mortem for are kept for good.
+        db.execute(
+            delete(Incident).where(
+                Incident.resolved_at < now - INCIDENT_RETENTION,
+                Incident.title.is_(None),
+                Incident.postmortem.is_(None),
+                ~exists().where(IncidentUpdate.incident_id == Incident.id),
+            )
+        )
 
 
 class Scheduler:

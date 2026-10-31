@@ -13,10 +13,13 @@ from sqlalchemy.orm import Session
 from ..auth import require_admin
 from ..config import Settings, get_settings
 from ..db import get_db, utcnow
-from ..models import AdminSession, Check, Incident, LegalPage, Monitor, SiteSetting
+from ..models import AdminSession, Check, Incident, IncidentUpdate, LegalPage, Monitor, SiteSetting
 from ..schemas import (
     CheckOut,
+    IncidentDetailOut,
+    IncidentIn,
     IncidentOut,
+    IncidentUpdateIn,
     LegalKind,
     LegalPageIn,
     MonitorIn,
@@ -135,8 +138,18 @@ def list_incidents(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     _no_store(response)
+    of_incident = IncidentUpdate.incident_id == Incident.id
+    update_count = select(func.count()).where(of_incident).correlate(Incident).scalar_subquery()
+    latest_status = (
+        select(IncidentUpdate.status)
+        .where(of_incident)
+        .order_by(IncidentUpdate.created_at.desc(), IncidentUpdate.id.desc())
+        .limit(1)
+        .correlate(Incident)
+        .scalar_subquery()
+    )
     rows = db.execute(
-        select(Incident, Monitor.name)
+        select(Incident, Monitor.name, update_count, latest_status)
         .join(Monitor, Monitor.id == Incident.monitor_id)
         .order_by(Incident.started_at.desc())
         .limit(limit)
@@ -150,17 +163,105 @@ def list_incidents(
             "resolved_at": inc.resolved_at,
             "kind": inc.kind,
             "error": inc.error,
+            "title": inc.title,
+            "update_count": count,
+            "latest_status": latest,
+            "has_postmortem": inc.postmortem is not None,
         }
-        for inc, name in rows
+        for inc, name, count, latest in rows
     ]
+
+
+def _get_incident(db: Session, incident_id: int) -> Incident:
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
+    return incident
+
+
+def _get_update(db: Session, incident_id: int, update_id: int) -> IncidentUpdate:
+    update = db.get(IncidentUpdate, update_id)
+    if update is None or update.incident_id != incident_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Update not found")
+    return update
+
+
+def _incident_detail(db: Session, incident: Incident) -> dict:
+    monitor = db.get(Monitor, incident.monitor_id)
+    updates = db.scalars(
+        select(IncidentUpdate)
+        .where(IncidentUpdate.incident_id == incident.id)
+        .order_by(IncidentUpdate.created_at.desc(), IncidentUpdate.id.desc())
+    )
+    return {
+        "id": incident.id,
+        "monitor_id": incident.monitor_id,
+        "monitor_name": monitor.name,
+        "monitor_public": monitor.enabled and monitor.is_public,
+        "started_at": incident.started_at,
+        "resolved_at": incident.resolved_at,
+        "kind": incident.kind,
+        "error": incident.error,
+        "title": incident.title,
+        "postmortem": incident.postmortem,
+        "postmortem_at": incident.postmortem_at,
+        "updates": list(updates),
+    }
+
+
+@router.get("/incidents/{incident_id}", response_model=IncidentDetailOut)
+def read_incident(incident_id: ObjectId, response: Response, db: Session = Depends(get_db)) -> dict:
+    _no_store(response)
+    return _incident_detail(db, _get_incident(db, incident_id))
+
+
+@router.put("/incidents/{incident_id}", response_model=IncidentDetailOut)
+def write_incident(incident_id: ObjectId, body: IncidentIn, db: Session = Depends(get_db)) -> dict:
+    incident = _get_incident(db, incident_id)
+    incident.title = body.title
+    if body.postmortem != incident.postmortem:
+        incident.postmortem = body.postmortem
+        incident.postmortem_at = utcnow() if body.postmortem else None
+    db.commit()
+    status_cache.invalidate()
+    return _incident_detail(db, incident)
 
 
 @router.delete("/incidents/{incident_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_incident(incident_id: ObjectId, db: Session = Depends(get_db)) -> Response:
-    incident = db.get(Incident, incident_id)
-    if incident is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
-    db.delete(incident)
+    db.delete(_get_incident(db, incident_id))
+    db.commit()
+    status_cache.invalidate()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/incidents/{incident_id}/updates",
+    response_model=IncidentDetailOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_incident_update(incident_id: ObjectId, body: IncidentUpdateIn, db: Session = Depends(get_db)) -> dict:
+    incident = _get_incident(db, incident_id)
+    db.add(IncidentUpdate(incident_id=incident.id, status=body.status.value, message=body.message))
+    db.commit()
+    status_cache.invalidate()
+    return _incident_detail(db, incident)
+
+
+@router.put("/incidents/{incident_id}/updates/{update_id}", response_model=IncidentDetailOut)
+def edit_incident_update(
+    incident_id: ObjectId, update_id: ObjectId, body: IncidentUpdateIn, db: Session = Depends(get_db)
+) -> dict:
+    update = _get_update(db, incident_id, update_id)
+    update.status, update.message = body.status.value, body.message
+    db.commit()
+    status_cache.invalidate()
+    return _incident_detail(db, _get_incident(db, incident_id))
+
+
+@router.delete("/incidents/{incident_id}/updates/{update_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_incident_update(incident_id: ObjectId, update_id: ObjectId, db: Session = Depends(get_db)) -> Response:
+    db.delete(_get_update(db, incident_id, update_id))
     db.commit()
     status_cache.invalidate()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

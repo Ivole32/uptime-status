@@ -69,7 +69,7 @@
     </section>
 
     <section class="section">
-      <div class="section-head"><div><h2>Incidents</h2><p class="muted">Recorded automatically when a service goes down or gets much slower than usual. Delete false alarms here.</p></div></div>
+      <div class="section-head"><div><h2>Incidents</h2><p class="muted">Recorded automatically when a service goes down or gets much slower than usual. Open one to post updates for your visitors or write a post-mortem, or delete false alarms.</p></div></div>
       <div class="card table-wrap">
         <table>
           <thead><tr><th>Service</th><th>Started</th><th>Duration</th><th>Reason</th><th><span hidden>Actions</span></th></tr></thead>
@@ -159,6 +159,59 @@
         <button class="btn primary" type="submit">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Incident updates and post-mortem -->
+  <dialog id="incident-dialog" class="wide" aria-labelledby="incident-dialog-title">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2 id="incident-dialog-title">Incident</h2>
+          <p class="muted small" id="incident-summary"></p>
+        </div>
+        <a class="btn sm" id="incident-view" target="_blank" rel="noopener" hidden>View public page</a>
+      </div>
+
+      <form id="update-form" class="dialog-section" novalidate>
+        <h3 id="update-form-title">Post an update</h3>
+        <div class="form-grid">
+          <label class="field"><span>Status</span>
+            <select name="status">
+              <option value="investigating">Investigating</option>
+              <option value="identified">Identified</option>
+              <option value="monitoring">Monitoring</option>
+              <option value="update">Update</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </label>
+          <label class="field full"><span>Message</span><textarea name="message" maxlength="5000" rows="4" required placeholder="What is happening, and what are you doing about it?"></textarea></label>
+        </div>
+        <p class="muted small legal-help">Formatting: a blank line starts a new paragraph, <code>- List item</code>, <code>**bold**</code>, <code>[link text](https://example.com)</code>.</p>
+        <p class="error-box" id="update-error" role="alert" hidden></p>
+        <div class="form-actions">
+          <button class="btn" type="button" id="update-cancel" hidden>Cancel edit</button>
+          <button class="btn primary" type="submit">Post update</button>
+        </div>
+      </form>
+
+      <div class="dialog-section">
+        <h3>Updates</h3>
+        <div class="update-list" id="update-list"></div>
+      </div>
+
+      <form id="incident-form" class="dialog-section" novalidate>
+        <h3>Title and post-mortem</h3>
+        <div class="form-grid">
+          <label class="field full"><span>Title</span><input name="title" maxlength="120"><small id="incident-title-hint"></small></label>
+          <label class="field full"><span>Post-mortem</span><textarea name="postmortem" maxlength="20000" rows="8" placeholder="What happened, why, and what will prevent it next time"></textarea><small>Optional. Shown at the top of the incident page. Same formatting as updates, plus <code># Heading</code>.</small></label>
+        </div>
+        <p class="error-box" id="incident-error" role="alert" hidden></p>
+        <div class="form-actions">
+          <button class="btn" type="button" id="incident-close">Close</button>
+          <button class="btn primary" type="submit">Save title and post-mortem</button>
+        </div>
+      </form>
+    </div>
   </dialog>
 
   <!-- Confirmation -->

@@ -127,6 +127,29 @@ const UI = (() => {
     return "down";
   }
 
+  // ---------- Incidents ----------
+  // Status tags of written updates: label and badge colour.
+  const INCIDENT_STATUS = {
+    investigating: ["Investigating", "down"],
+    identified: ["Identified", "degraded"],
+    monitoring: ["Monitoring", "info"],
+    update: ["Update", ""],
+    resolved: ["Resolved", "up"],
+  };
+
+  function statusTag(status) {
+    const [label, cls] = INCIDENT_STATUS[status] || [status, ""];
+    return h("span", { class: "badge " + cls, text: label });
+  }
+
+  // The admin's title, or one generated from what monitoring saw.
+  function incidentTitle(inc) {
+    if (inc.title) return inc.title;
+    const active = !inc.resolved_at;
+    if (inc.kind === "degraded") return inc.monitor_name + (active ? " has elevated latency" : " had elevated latency");
+    return inc.monitor_name + (active ? " is down" : " was down");
+  }
+
   // ---------- Legal pages ----------
   const LEGAL_PATHS = { imprint: "/imprint", privacy: "/privacy" };
   const LINK_PROTOCOLS = ["https:", "http:", "mailto:", "tel:"];
@@ -206,5 +229,5 @@ const UI = (() => {
     return blocks;
   }
 
-  return { h, svg, icon, setupThemeToggle, fmtDateTime, fmtTime, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDuration, fmtRelative, fmtInterval, level, renderLegalLinks, renderRichText };
+  return { h, svg, icon, setupThemeToggle, fmtDateTime, fmtTime, fmtDay, fmtMonth, fmtPct, fmtMs, fmtDuration, fmtRelative, fmtInterval, level, renderLegalLinks, renderRichText, INCIDENT_STATUS, statusTag, incidentTitle };
 })();
