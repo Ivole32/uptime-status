@@ -13,6 +13,7 @@ from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import LegalPage
 from ..schemas import LEGAL_DEFAULT_TITLES, LegalKind, iso_utc
+from ..security import XML_CSP
 from ..stats import (
     get_legal_pages,
     get_public_incident,
@@ -108,7 +109,11 @@ def sitemap_xml(db: Session = Depends(get_db), settings: Settings = Depends(get_
         + "\n".join(entries)
         + "\n</urlset>\n"
     )
-    return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=300"})
+    return Response(
+        body,
+        media_type="application/xml",
+        headers={"Cache-Control": "public, max-age=300", "Content-Security-Policy": XML_CSP},
+    )
 
 
 @router.get("/healthz", include_in_schema=False)

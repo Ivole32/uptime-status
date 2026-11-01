@@ -23,6 +23,19 @@ CSP = "; ".join(
     ]
 )
 
+# For XML documents such as the sitemap. Browsers draw their XML tree view with inline
+# styles and data: icons; nothing else may load, and the document holds no markup of ours.
+XML_CSP = "; ".join(
+    [
+        "default-src 'none'",
+        "style-src 'unsafe-inline'",
+        "img-src data:",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    ]
+)
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
@@ -55,7 +68,8 @@ class SecurityHeadersMiddleware:
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                headers["Content-Security-Policy"] = CSP
+                # A route may set a narrower policy for a non-HTML document.
+                headers.setdefault("Content-Security-Policy", CSP)
                 headers["X-Content-Type-Options"] = "nosniff"
                 headers["X-Frame-Options"] = "DENY"
                 headers["Referrer-Policy"] = "no-referrer"

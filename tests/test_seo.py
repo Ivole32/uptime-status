@@ -37,6 +37,14 @@ def test_robots_without_site_url(client):
     assert client.get("/sitemap.xml").status_code == 404
 
 
+def test_sitemap_csp_allows_only_the_browser_xml_viewer(client, site_url):
+    # Browsers style their XML tree view inline; nothing else may run or load.
+    csp = client.get("/sitemap.xml").headers["content-security-policy"]
+    assert "style-src 'unsafe-inline'" in csp and "default-src 'none'" in csp and "script-src" not in csp
+    assert "unsafe-inline" not in client.get("/").headers["content-security-policy"]
+    assert "unsafe-inline" not in client.get("/robots.txt").headers["content-security-policy"]
+
+
 def test_robots_points_to_sitemap(client, site_url):
     assert "Sitemap: https://status.example.com/sitemap.xml\n" in client.get("/robots.txt").text
 
