@@ -25,6 +25,8 @@ status, 90-day history, response times and incidents.
 - Imprint (`/imprint`) and privacy policy (`/privacy`), linked in the footer once they have
   text. They, incident updates and post-mortems support a small Markdown subset: `# Heading`, `- list`, `1. list`, `**bold**` and
   `[text](https://…)` links. HTML is shown as plain text.
+- `robots.txt` and `sitemap.xml` (status page, legal pages and public incident pages), with
+  absolute URLs from `UPTIME_PUBLIC_URL` or your first allowed host.
 - Per-monitor check interval (10 s to 24 h) and timeout.
 - Monitors can be hidden from the public page, and the URL is only shown publicly if you allow it.
 - Raw checks are kept for 30 days (configurable). Daily rollups are kept indefinitely, so
@@ -173,6 +175,7 @@ All settings are environment variables (see `.env.example`):
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `UPTIME_ALLOWED_HOSTS` | *(any)* | Comma-separated hostnames to answer to (Host header check). |
+| `UPTIME_PUBLIC_URL` | *(derived)* | Public base URL, e.g. `https://status.example.com`, used in `sitemap.xml` and `robots.txt`. Defaults to the first `UPTIME_ALLOWED_HOSTS` entry (`https` while `UPTIME_COOKIE_SECURE` is on). Without either, `/sitemap.xml` returns 404. |
 | `UPTIME_COOKIE_SECURE` | `true` | Secure session cookie and HSTS. Keep on behind HTTPS. |
 | `UPTIME_FORWARDED_ALLOW_IPS` | `172.30.0.1` | Proxy IPs/CIDRs whose `X-Forwarded-*` headers are trusted. |
 | `UPTIME_SUBNET` | `172.30.0.0/24` | Docker network subnet (compose only). |

@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 from typing import Annotated
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..db import get_db
 from ..models import LegalPage
 from ..schemas import LEGAL_DEFAULT_TITLES, LegalKind, iso_utc
-from ..stats import get_public_incident, get_site_settings, legal_links, status_cache
+from ..stats import (
+    get_legal_pages,
+    get_public_incident,
+    get_site_settings,
+    legal_links,
+    public_incident_pages,
+    status_cache,
+)
 
 router = APIRouter()
+# The protocol's limit per sitemap file.
+SITEMAP_MAX_URLS = 50_000
 
 
 @router.get("/api/status")
@@ -64,6 +75,40 @@ def incident(
         "site": {"title": get_site_settings(db)["title"]},
         "legal": legal_links(db),
     }
+
+
+@router.get("/robots.txt", include_in_schema=False)
+def robots_txt(settings: Settings = Depends(get_settings)) -> PlainTextResponse:
+    # /api/status and /api/incidents stay crawlable: the pages are rendered from them.
+    lines = ["User-agent: *", "Disallow: /admin", "Disallow: /api/admin/", "Disallow: /api/auth/"]
+    if settings.site_url:
+        lines += ["", f"Sitemap: {settings.site_url}/sitemap.xml"]
+    return PlainTextResponse("\n".join(lines) + "\n", headers={"Cache-Control": "public, max-age=3600"})
+
+
+@router.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml(db: Session = Depends(get_db), settings: Settings = Depends(get_settings)) -> Response:
+    # A sitemap needs absolute URLs, and the Host header is client-supplied.
+    if not settings.site_url:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    pages: list[tuple[str, str | None]] = [("/", None)]
+    pages += [(f"/{kind.value}", iso_utc(page.updated_at)) for kind, page in get_legal_pages(db).items()]
+    incidents = public_incident_pages(db, SITEMAP_MAX_URLS - len(pages))
+    pages += [(f"/incidents/{iid}", iso_utc(changed)) for iid, changed in incidents]
+
+    entries = []
+    for path, lastmod in pages:
+        entry = f"<url><loc>{escape(settings.site_url + path)}</loc>"
+        if lastmod:
+            entry += f"<lastmod>{lastmod}</lastmod>"
+        entries.append(entry + "</url>")
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(entries)
+        + "\n</urlset>\n"
+    )
+    return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.get("/healthz", include_in_schema=False)

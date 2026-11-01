@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -131,6 +131,24 @@ def get_public_incident(db: Session, incident_id: int) -> dict | None:
         "postmortem_at": iso_utc(inc.postmortem_at),
         "updates": [_update_out(u) for u in updates],
     }
+
+
+def public_incident_pages(db: Session, limit: int) -> list[tuple[int, datetime]]:
+    """IDs of incidents with a public page and when each last changed, newest first."""
+    last_update = (
+        select(IncidentUpdate.incident_id, func.max(IncidentUpdate.created_at).label("at"))
+        .group_by(IncidentUpdate.incident_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(Incident.id, Incident.started_at, Incident.resolved_at, Incident.postmortem_at, last_update.c.at)
+        .join(Monitor, Monitor.id == Incident.monitor_id)
+        .outerjoin(last_update, last_update.c.incident_id == Incident.id)
+        .where(*_PUBLIC_MONITOR)
+        .order_by(Incident.started_at.desc(), Incident.id.desc())
+        .limit(limit)
+    )
+    return [(row[0], max(t for t in row[1:] if t is not None)) for row in rows]
 
 
 def _pct(up: int, total: int) -> float | None:

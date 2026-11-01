@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _env(name: str, default: str) -> str:
@@ -59,6 +60,17 @@ def _networks(name: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network,
         raise ValueError(f"UPTIME_{name} must be a list of IP addresses or CIDRs: {exc}") from exc
 
 
+def _url(name: str) -> str | None:
+    """Optional absolute http(s) base URL, without a trailing slash."""
+    raw = _env(name, "").rstrip("/")
+    if not raw:
+        return None
+    parts = urlsplit(raw)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.query or parts.fragment:
+        raise ValueError(f"UPTIME_{name} must be an http(s) URL like https://status.example.com")
+    return raw
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -81,6 +93,17 @@ class Settings:
     login_max_attempts: int = 5
     login_window_minutes: int = 15
     enable_api_docs: bool = False
+    public_url: str | None = None
+
+    @property
+    def site_url(self) -> str | None:
+        """Base URL for absolute links, e.g. in the sitemap. Never taken from the Host header."""
+        if self.public_url:
+            return self.public_url
+        hosts = [h for h in self.allowed_hosts if "*" not in h]
+        if not hosts:
+            return None
+        return f"{'https' if self.cookie_secure else 'http'}://{hosts[0]}"
 
     @property
     def session_cookie_name(self) -> str:
@@ -111,4 +134,5 @@ def get_settings() -> Settings:
         login_max_attempts=_int("LOGIN_MAX_ATTEMPTS", 5, 1, 100),
         login_window_minutes=_int("LOGIN_WINDOW_MINUTES", 15, 1, 1440),
         enable_api_docs=_bool("ENABLE_API_DOCS", False),
+        public_url=_url("PUBLIC_URL"),
     )

@@ -12,6 +12,7 @@ services:
     environment:
       UPTIME_COOKIE_SECURE: ${UPTIME_COOKIE_SECURE:-true}
       UPTIME_ALLOWED_HOSTS: ${UPTIME_ALLOWED_HOSTS:-}
+      UPTIME_PUBLIC_URL: ${UPTIME_PUBLIC_URL:-}
       # Requests to the published port arrive from this network's gateway, which is
       # where a reverse proxy on the host connects from. Trust its X-Forwarded-For.
       UPTIME_FORWARDED_ALLOW_IPS: ${UPTIME_FORWARDED_ALLOW_IPS:-172.30.0.1}
