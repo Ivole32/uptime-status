@@ -179,6 +179,8 @@ textarea { resize: vertical; min-height: 70px; }
 
 /* ---- Incidents ---- */
 .incident-group + .incident-group { margin-top: 22px; }
+.incident-pager { justify-content: center; align-items: center; margin-top: 18px; }
+#past-heading { scroll-margin-top: 76px; }
 .incident-group h3 { font-size: 0.9rem; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
 .incident { display: block; padding: 16px 20px; border-left: 3px solid var(--up); text-decoration: none; color: inherit; }
 a.incident:hover { color: inherit; background: var(--surface-2); }

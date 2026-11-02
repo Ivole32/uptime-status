@@ -74,9 +74,14 @@
     <section class="section" id="incidents" aria-labelledby="incidents-heading">
       <h2 id="incidents-heading">Current incidents</h2>
       <div id="active-incidents" class="subhead"></div>
-      <h2>Past incidents</h2>
+      <h2 id="past-heading">Past incidents</h2>
       <p class="muted small">Last 90 days</p>
       <div id="past-incidents" class="subhead"></div>
+      <nav class="pager incident-pager" id="past-pager" aria-label="Past incidents pages" hidden>
+        <button class="link-btn" id="past-newer" type="button">← Newer</button>
+        <span class="muted" id="past-page" aria-live="polite"></span>
+        <button class="link-btn" id="past-older" type="button">Older →</button>
+      </nav>
     </section>
   </main>
 

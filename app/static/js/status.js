@@ -33,6 +33,8 @@
 
   let data = null;
   let monthOffset = 0; // 0 = current month, -1 = previous, ...
+  const PAST_PAGE_SIZE = 10;
+  let pastPage = 0; // 0 = newest past incidents
   let timer = null;
   let loading = false;
 
@@ -225,13 +227,26 @@
         : [h("div", { class: "card empty" }, h("strong", { text: "No active incidents" }), h("p", { class: "small", text: "All monitored services are currently stable." }))])
     );
 
+    renderPastIncidents();
+  }
+
+  function renderPastIncidents() {
+    const { past } = data.incidents;
     const pastEl = $("past-incidents");
+    const pages = Math.ceil(past.length / PAST_PAGE_SIZE);
+    $("past-pager").hidden = pages <= 1;
     if (!past.length) {
       pastEl.replaceChildren(h("div", { class: "card empty", text: "No incidents in the last 90 days." }));
       return;
     }
+    // Keep the page across refreshes, but never past the end if incidents drop out of the window.
+    pastPage = Math.min(pastPage, pages - 1);
+    $("past-page").textContent = "Page " + (pastPage + 1) + " of " + pages;
+    $("past-newer").disabled = pastPage === 0;
+    $("past-older").disabled = pastPage >= pages - 1;
+
     const groups = new Map();
-    for (const inc of past) {
+    for (const inc of past.slice(pastPage * PAST_PAGE_SIZE, (pastPage + 1) * PAST_PAGE_SIZE)) {
       const d = new Date(inc.started_at);
       const key = fmtMonth(new Date(Date.UTC(d.getFullYear(), d.getMonth(), 1)));
       if (!groups.has(key)) groups.set(key, []);
@@ -277,6 +292,15 @@
   $("search").addEventListener("input", applySearch);
   $("month-prev").addEventListener("click", () => { monthOffset--; renderMonth(); });
   $("month-next").addEventListener("click", () => { monthOffset = Math.min(0, monthOffset + 1); renderMonth(); });
+  function turnPastPage(delta) {
+    pastPage = Math.max(0, pastPage + delta);
+    renderPastIncidents();
+    // The list height changes, so bring its heading back into view if it scrolled away.
+    const heading = $("past-heading");
+    if (heading.getBoundingClientRect().top < 76) heading.scrollIntoView({ block: "start" });
+  }
+  $("past-newer").addEventListener("click", () => turnPastPage(-1));
+  $("past-older").addEventListener("click", () => turnPastPage(1));
   UI.setupThemeToggle($("theme-toggle"));
   load();
 })();
