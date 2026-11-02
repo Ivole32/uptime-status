@@ -171,3 +171,22 @@ def test_deleting_incident_removes_updates(admin):
     with SessionLocal() as db:
         assert db.query(IncidentUpdate).count() == 0
     assert admin.get(f"/api/incidents/{iid}").status_code == 404
+
+
+def test_admin_incident_list_pages(admin):
+    mid = admin.post("/api/admin/monitors", json=MONITOR).json()["id"]
+    now = utcnow()
+    with SessionLocal() as db:
+        db.add_all(
+            Incident(monitor_id=mid, started_at=now - timedelta(hours=i), resolved_at=now - timedelta(hours=i) + timedelta(minutes=5))
+            for i in range(5)
+        )
+        db.commit()
+    newest = admin.get("/api/admin/incidents?limit=2").json()
+    older = admin.get("/api/admin/incidents?limit=2&offset=2").json()
+    last = admin.get("/api/admin/incidents?limit=2&offset=4").json()
+    assert [len(newest), len(older), len(last)] == [2, 2, 1]
+    ids = [inc["id"] for inc in newest + older + last]
+    assert len(set(ids)) == 5
+    assert admin.get("/api/admin/incidents?offset=5").json() == []
+    assert admin.get("/api/admin/incidents?offset=-1").status_code == 422

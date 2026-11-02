@@ -135,6 +135,7 @@ def recent_checks(
 def list_incidents(
     response: Response,
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=1_000_000),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     _no_store(response)
@@ -151,8 +152,9 @@ def list_incidents(
     rows = db.execute(
         select(Incident, Monitor.name, update_count, latest_status)
         .join(Monitor, Monitor.id == Incident.monitor_id)
-        .order_by(Incident.started_at.desc())
+        .order_by(Incident.started_at.desc(), Incident.id.desc())
         .limit(limit)
+        .offset(offset)
     )
     return [
         {

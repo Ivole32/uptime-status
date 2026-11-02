@@ -291,9 +291,26 @@
   }
 
   // ---------- Incidents ----------
+  const INCIDENT_PAGE_SIZE = 25;
+  let incidentPage = 0; // 0 = newest incidents
+
   async function loadIncidents() {
     try {
-      const incidents = await api("GET", "/api/admin/incidents?limit=100");
+      // One extra row tells whether an older page exists.
+      const query = "?limit=" + (INCIDENT_PAGE_SIZE + 1) + "&offset=" + incidentPage * INCIDENT_PAGE_SIZE;
+      let incidents = await api("GET", "/api/admin/incidents" + query);
+      if (!incidents.length && incidentPage > 0) {
+        // The page emptied, e.g. after deleting its last incident.
+        incidentPage--;
+        return loadIncidents();
+      }
+      const hasOlder = incidents.length > INCIDENT_PAGE_SIZE;
+      incidents = incidents.slice(0, INCIDENT_PAGE_SIZE);
+      $("incident-pager").hidden = incidentPage === 0 && !hasOlder;
+      $("incident-page").textContent = "Page " + (incidentPage + 1);
+      $("incident-newer").disabled = incidentPage === 0;
+      $("incident-older").disabled = !hasOlder;
+
       const body = $("incident-rows");
       if (!incidents.length) {
         body.replaceChildren(h("tr", {}, h("td", { colspan: "5", class: "empty", text: "No incidents recorded." })));
@@ -331,6 +348,13 @@
       loadIncidents();
     } catch (err) { notify(err.message, true); }
   }
+
+  function turnIncidentPage(delta) {
+    incidentPage = Math.max(0, incidentPage + delta);
+    loadIncidents();
+  }
+  $("incident-newer").addEventListener("click", () => turnIncidentPage(-1));
+  $("incident-older").addEventListener("click", () => turnIncidentPage(1));
 
   // ---------- Incident updates and post-mortem ----------
   const incidentDialog = $("incident-dialog");
