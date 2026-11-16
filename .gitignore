@@ -1,5 +1,6 @@
 # Secrets & local config
 config/admin.toml
+config/pushgate.key
 .env
 
 # Data

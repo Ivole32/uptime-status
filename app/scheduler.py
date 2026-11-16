@@ -11,6 +11,8 @@ from datetime import date, timedelta
 from sqlalchemy import delete, exists, func, select
 from sqlalchemy.orm import Session
 
+from .alerts import SWEEP_INTERVAL as ALERT_SWEEP_INTERVAL
+from .alerts import run_alerts
 from .checker import ProbeResult, probe
 from .config import Settings, get_settings
 from .db import session_scope, utcnow
@@ -164,6 +166,8 @@ class Scheduler:
         self._wake = asyncio.Event()
         self._stopping = False
         self._last_maintenance = utcnow() - MAINTENANCE_INTERVAL
+        self._last_alert_sweep = utcnow() - ALERT_SWEEP_INTERVAL
+        self._alert_task: asyncio.Task | None = None
 
     def wake(self) -> None:
         """Re-evaluate due monitors immediately (e.g. after an edit)."""
@@ -208,6 +212,12 @@ class Scheduler:
         finally:
             self._in_flight.discard(monitor_id)
 
+    async def _run_alerts(self) -> None:
+        try:
+            await asyncio.to_thread(run_alerts, self.settings)
+        except Exception:
+            log.exception("Alert sweep failed")
+
     async def run(self) -> None:
         log.info("Scheduler started")
         while not self._stopping:
@@ -219,6 +229,15 @@ class Scheduler:
                     task = asyncio.create_task(self._run_check(monitor_id, url, timeout))
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
+                # Alerts run as their own task: a slow Pushgate must not hold up checks.
+                if (
+                    utcnow() - self._last_alert_sweep >= ALERT_SWEEP_INTERVAL
+                    and (self._alert_task is None or self._alert_task.done())
+                ):
+                    self._last_alert_sweep = utcnow()
+                    self._alert_task = asyncio.create_task(self._run_alerts())
+                    self._tasks.add(self._alert_task)
+                    self._alert_task.add_done_callback(self._tasks.discard)
                 if utcnow() - self._last_maintenance >= MAINTENANCE_INTERVAL:
                     self._last_maintenance = utcnow()
                     await asyncio.to_thread(run_maintenance, self.settings)

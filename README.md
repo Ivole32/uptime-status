@@ -29,6 +29,8 @@ status, 90-day history, response times and incidents.
   absolute URLs from `UPTIME_PUBLIC_URL` or your first allowed host.
 - Per-monitor check interval (10 s to 24 h) and timeout.
 - Monitors can be hidden from the public page, and the URL is only shown publicly if you allow it.
+- Push alerts through [Pushgate](https://github.com/Ivole32/pushgate) when a service stays
+  down longer than a delay you choose, globally or per monitor, plus a notice when it recovers.
 - Raw checks are kept for 30 days (configurable). Daily rollups are kept indefinitely, so
   history stays cheap.
 
@@ -168,6 +170,67 @@ docker compose exec uptime python -c "import socket; socket.create_connection(('
 docker compose exec uptime python -c "import socket; socket.create_connection(('example.com', 443), 3)"
 ```
 
+## Push alerts (Pushgate)
+
+Uptime Status can send a push notification to your phone through a
+[Pushgate](https://github.com/Ivole32/pushgate) server when a service has been down for longer
+than you allow, and another one when it is back up.
+
+**1. Create a key in Pushgate.** In the Pushgate app, *Service API keys → Create key*, e.g.
+named `uptime`. The name is put in front of every notification title (`uptime: Website is down`).
+For high-priority alerts the key needs the `notifications:send:high` scope; otherwise choose
+*Normal* priority in the alert settings.
+
+**2. Store the key** in `config/pushgate.key` (one line, `pgk_…`) and fix its permissions.
+`config/` belongs to the container user, so write it as root; pasting keeps the key out of your
+shell history:
+
+```bash
+sudo sh -c 'cat > config/pushgate.key'   # paste the key, Enter, then Ctrl-D
+sudo scripts/fix-config-permissions.sh
+```
+
+The file is read on every send, so a rotated key applies without a restart. For setups without
+the config directory, `UPTIME_PUSHGATE_KEY` (the key itself) or `UPTIME_PUSHGATE_KEY_FILE` (another
+path) work too.
+
+**3. Point it at Pushgate** in `.env` and restart:
+
+```env
+UPTIME_PUSHGATE_URL=https://notify.example.com
+```
+
+Only `https` is accepted, and redirects are not followed, so the key is never sent anywhere else.
+
+**4. Let the container reach Pushgate.** Pushgate only accepts senders from its `TRUSTED_CIDRS`:
+
+- Pushgate on the **same host**: requests leave the container from the `uptime-status` network,
+  so add `172.30.0.0/24` (or your `UPTIME_SUBNET`) to Pushgate's `TRUSTED_CIDRS`. If you use the
+  firewall rules from [Restrict the container's outbound traffic](#restrict-the-containers-outbound-traffic-recommended),
+  the `INPUT` rules block the host itself; allow HTTPS to it first:
+  `iptables -I INPUT 1 -i br-uptime -p tcp --dport 443 -j ACCEPT`.
+  Monitors still cannot reach the host, because its addresses are in `UPTIME_BLOCKED_NETWORKS`.
+- Pushgate on **another machine**: add this server's public address to `TRUSTED_CIDRS`. If that
+  machine has a private address, add an exception for it before the `DOCKER-USER` `REJECT` rule.
+
+**5. Turn alerts on** in `/admin` → *Settings* → *Push alerts*: choose after how many minutes of
+downtime to alert (default 5, `0` alerts on the first failed check), the priority, and whether
+to be told about recovery and elevated latency. *Send test alert* checks the whole chain; the
+card shows the last error if sending fails. Each monitor can override the delay or turn alerts
+off in its edit dialog.
+
+How it behaves:
+
+- The delay counts from the first failed check, after the retry. An outage that ends earlier
+  never sends anything. Each incident is alerted once.
+- A recovery notice follows only for incidents that were alerted, and only within 24 hours.
+  It replaces the outage notification on the phone (same Pushgate `tag`).
+- More than three alerts at once (for example when the server itself lost its connection)
+  are combined into one notification.
+- Paused monitors are not alerted. If Pushgate is unreachable or refuses the request, the
+  alert stays pending and is retried after a pause that grows from 30 s to 10 min (or
+  Pushgate's `Retry-After`). Sending runs separately from the checks, so it never delays them.
+
 ## Configuration
 
 All settings are environment variables (see `.env.example`):
@@ -193,6 +256,9 @@ All settings are environment variables (see `.env.example`):
 | `UPTIME_MAX_MONITORS` | `200` | Upper limit on monitors. |
 | `UPTIME_LOGIN_MAX_ATTEMPTS` | `5` | Failed logins per IP per window. |
 | `UPTIME_LOGIN_WINDOW_MINUTES` | `15` | Rate-limit window. |
+| `UPTIME_PUSHGATE_URL` | *(none)* | Pushgate base URL for push alerts, e.g. `https://notify.example.com`. See [Push alerts](#push-alerts-pushgate). |
+| `UPTIME_PUSHGATE_KEY_FILE` | `/config/pushgate.key` | File holding the Pushgate API key. |
+| `UPTIME_PUSHGATE_KEY` | *(none)* | The Pushgate API key itself, instead of the file. |
 | `UPTIME_ENABLE_API_DOCS` | `false` | Expose OpenAPI docs at `/api/docs`. |
 
 ## How checks work
@@ -299,6 +365,7 @@ app/
   passwords.py   scrypt hashing (stdlib only)
   checker.py     HTTP(S) probe with SSRF protection
   scheduler.py   background check loop, incidents, daily rollups, retention
+  alerts.py      push alerts through Pushgate
   stats.py       public status payload
   routes/        public, auth and admin API
   static/        HTML, CSS, JS
