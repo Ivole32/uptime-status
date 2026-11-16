@@ -65,7 +65,7 @@
     $("login-view").hidden = true;
     $("app-view").hidden = false;
     $("logout-btn").hidden = false;
-    await Promise.all([loadMonitors(), loadIncidents(), loadSettings(), loadLegal()]);
+    await Promise.all([loadMonitors(), loadIncidents(), loadSettings(), loadAlerts(), loadLegal()]);
     clearInterval(refreshTimer);
     refreshTimer = setInterval(() => {
       const editing = $("monitor-dialog").open || $("incident-dialog").open;
@@ -76,7 +76,7 @@
   // ---------- Tabs ----------
   const VIEWS = {
     monitors: ["Monitors", "Add the domains you want to watch. Each one is requested on its own interval and its response time is recorded."],
-    settings: ["Settings", "Title, description and legal pages of the public status page."],
+    settings: ["Settings", "Title, description and legal pages of the public status page, and push alerts."],
   };
   const tabs = [...document.querySelectorAll("[role=tab]")];
   let currentTab = "monitors";
@@ -209,11 +209,13 @@
     showError($("monitor-error"), "");
     $("monitor-dialog-title").textContent = m ? "Edit monitor" : "Add monitor";
     $("recent-checks").hidden = !m;
+    $("alert-after-hint").textContent = alertDefault === null ? "Empty uses the default from Settings" : "Empty uses the default (" + alertDefault + " min)";
     if (m) {
       for (const key of ["name", "url", "description", "interval_seconds", "timeout_seconds", "sort_order"]) {
         form.elements[key].value = m[key] === null ? "" : m[key];
       }
-      for (const key of ["enabled", "is_public", "show_url"]) form.elements[key].checked = m[key];
+      for (const key of ["enabled", "is_public", "show_url", "alerts_enabled"]) form.elements[key].checked = m[key];
+      form.elements.alert_after_minutes.value = m.alert_after_minutes === null ? "" : m.alert_after_minutes;
       $("recent-list").replaceChildren(h("div", {}, "Loading…"));
     }
     dialog.showModal();
@@ -247,6 +249,8 @@
       enabled: els.enabled.checked,
       is_public: els.is_public.checked,
       show_url: els.show_url.checked,
+      alerts_enabled: els.alerts_enabled.checked,
+      alert_after_minutes: els.alert_after_minutes.value.trim() === "" ? null : parseInt(els.alert_after_minutes.value, 10),
     };
     const submit = form.querySelector("button[type=submit]");
     submit.disabled = true;
@@ -530,6 +534,84 @@
       notify("Settings saved");
     } catch (err) {
       showError($("settings-error"), err.message);
+    }
+  });
+
+  // ---------- Push alerts ----------
+  const alertsForm = $("alerts-form");
+  let alertDefault = null;
+
+  function renderAlertState(a) {
+    const p = a.pushgate;
+    const el = $("alerts-state");
+    let text;
+    let cls = "small alert-state";
+    if (p.problem) {
+      text = "Not connected: " + p.problem + ". See the README, “Push alerts”.";
+      cls += " err";
+    } else if (p.last_error) {
+      text = "Last attempt failed (" + fmtDateTime(p.last_error_at) + "): " + p.last_error + (p.retry_at ? ". Next try at " + fmtDateTime(p.retry_at) + "." : "");
+      cls += " err";
+    } else {
+      text = "Connected to " + p.url + (p.last_sent_at ? " · last alert sent " + fmtDateTime(p.last_sent_at) : "");
+      cls += " muted";
+    }
+    el.className = cls;
+    el.textContent = text;
+  }
+
+  function fillAlerts(a) {
+    alertDefault = a.after_minutes;
+    alertsForm.elements.enabled.checked = a.enabled;
+    alertsForm.elements.after_minutes.value = a.after_minutes;
+    alertsForm.elements.priority.value = a.priority;
+    alertsForm.elements.on_recovery.checked = a.on_recovery;
+    alertsForm.elements.on_degraded.checked = a.on_degraded;
+    renderAlertState(a);
+  }
+
+  async function loadAlerts() {
+    try {
+      fillAlerts(await api("GET", "/api/admin/alerts"));
+    } catch (err) {
+      if (err.status !== 401) notify(err.message, true);
+    }
+  }
+
+  alertsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const els = alertsForm.elements;
+    showError($("alerts-error"), "");
+    const submit = alertsForm.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      fillAlerts(await api("PUT", "/api/admin/alerts", {
+        enabled: els.enabled.checked,
+        after_minutes: parseInt(els.after_minutes.value, 10),
+        priority: els.priority.value,
+        on_recovery: els.on_recovery.checked,
+        on_degraded: els.on_degraded.checked,
+      }));
+      notify("Alert settings saved");
+    } catch (err) {
+      showError($("alerts-error"), err.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  $("alerts-test").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    showError($("alerts-error"), "");
+    button.disabled = true;
+    try {
+      const res = await api("POST", "/api/admin/alerts/test", { priority: alertsForm.elements.priority.value });
+      notify(res.status === "no_devices" ? "Sent, but Pushgate has no registered device" : res.status === "filtered" ? "Sent, but every device filters this priority" : "Test alert sent");
+    } catch (err) {
+      showError($("alerts-error"), err.message);
+    } finally {
+      button.disabled = false;
+      loadAlerts();
     }
   });
 

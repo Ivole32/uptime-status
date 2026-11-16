@@ -71,6 +71,18 @@ def _url(name: str) -> str | None:
     return raw
 
 
+def _pushgate_url(name: str) -> str | None:
+    """Pushgate base URL (https only: the API key travels with every request)."""
+    raw = _env(name, "").rstrip("/")
+    if not raw:
+        return None
+    raw = raw.removesuffix("/api/v1/notifications")
+    parts = urlsplit(raw)
+    if parts.scheme != "https" or not parts.hostname or parts.query or parts.fragment or parts.username:
+        raise ValueError(f"UPTIME_{name} must be an https URL like https://notify.example.com")
+    return raw
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -94,6 +106,9 @@ class Settings:
     login_window_minutes: int = 15
     enable_api_docs: bool = False
     public_url: str | None = None
+    pushgate_url: str | None = None
+    pushgate_key: str | None = None
+    pushgate_key_file: Path | None = None
 
     @property
     def site_url(self) -> str | None:
@@ -135,4 +150,7 @@ def get_settings() -> Settings:
         login_window_minutes=_int("LOGIN_WINDOW_MINUTES", 15, 1, 1440),
         enable_api_docs=_bool("ENABLE_API_DOCS", False),
         public_url=_url("PUBLIC_URL"),
+        pushgate_url=_pushgate_url("PUSHGATE_URL"),
+        pushgate_key=_env("PUSHGATE_KEY", "") or None,
+        pushgate_key_file=Path(_env("PUSHGATE_KEY_FILE", "/config/pushgate.key")),
     )

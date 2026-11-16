@@ -25,6 +25,8 @@ services:
       UPTIME_DEGRADED_FACTOR: ${UPTIME_DEGRADED_FACTOR:-2}
       UPTIME_DEGRADED_MIN_MS: ${UPTIME_DEGRADED_MIN_MS:-200}
       UPTIME_ALLOWED_PORTS: ${UPTIME_ALLOWED_PORTS:-80,443,8080,8443}
+      # Push alerts through Pushgate. The API key is read from config/pushgate.key.
+      UPTIME_PUSHGATE_URL: ${UPTIME_PUSHGATE_URL:-}
     volumes:
       - uptime-data:/data
       # Mount the directory, not the file: a single-file bind mount is pinned to

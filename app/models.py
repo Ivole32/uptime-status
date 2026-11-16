@@ -32,6 +32,9 @@ class Monitor(Base):
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     show_url: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Push alerts through Pushgate. A null delay uses the default from the alert settings.
+    alerts_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    alert_after_minutes: Mapped[int | None] = mapped_column(Integer)
 
     # Current state, denormalised for cheap reads.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
@@ -102,6 +105,9 @@ class Incident(Base):
     title: Mapped[str | None] = mapped_column(String(120))
     postmortem: Mapped[str | None] = mapped_column(Text)
     postmortem_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # When the push alert for this incident, and the one for its recovery, went out.
+    alert_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+    recovery_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     updates: Mapped[list[IncidentUpdate]] = relationship(
         back_populates="incident", cascade="all, delete-orphan", passive_deletes=True

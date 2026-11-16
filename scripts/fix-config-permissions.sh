@@ -1,5 +1,6 @@
 #!/bin/sh
-# Make config/admin.toml readable for the container, and for nobody else.
+# Make config/admin.toml (and config/pushgate.key, if present) readable for the
+# container, and for nobody else.
 #
 # The app runs as UID/GID 10001 inside the container. Which host user that is
 # depends on Docker: without user-namespace remapping it is 10001, with
@@ -49,6 +50,10 @@ gid=$(in_container cat /proc/self/gid_map | host_id) || {
 chown "$uid:$gid" config config/admin.toml
 chmod 0500 config
 chmod 0400 config/admin.toml
+if [ -f config/pushgate.key ]; then
+    chown "$uid:$gid" config/pushgate.key
+    chmod 0400 config/pushgate.key
+fi
 
 if [ "$uid" -eq "$APP_ID" ]; then
     echo "config/ is now owned by UID $uid (no user-namespace remapping)."

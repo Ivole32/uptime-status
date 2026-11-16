@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from .alerts import MAX_ALERT_AFTER_MINUTES
 from .checker import TargetError, normalize_target
 from .config import get_settings
 
@@ -63,6 +64,9 @@ class MonitorBase(_Strict):
     is_public: bool = True
     show_url: bool = False
     sort_order: int = Field(default=0, ge=-10_000, le=10_000)
+    alerts_enabled: bool = True
+    # Null uses the default from the alert settings.
+    alert_after_minutes: int | None = Field(default=None, ge=0, le=MAX_ALERT_AFTER_MINUTES)
 
     @field_validator("name", "description")
     @classmethod
@@ -109,6 +113,8 @@ class MonitorOut(BaseModel):
     is_public: bool
     show_url: bool
     sort_order: int
+    alerts_enabled: bool
+    alert_after_minutes: int | None
     status: str
     last_checked_at: UTCDateTime | None
     last_response_ms: int | None
@@ -225,6 +231,24 @@ class SiteSettingsIn(_Strict):
         if not self.title:
             raise ValueError("Title must not be empty")
         return self
+
+
+class AlertPriority(StrEnum):
+    low = "low"
+    normal = "normal"
+    high = "high"
+
+
+class AlertSettingsIn(_Strict):
+    enabled: bool
+    after_minutes: int = Field(ge=0, le=MAX_ALERT_AFTER_MINUTES)
+    on_recovery: bool = True
+    on_degraded: bool = False
+    priority: AlertPriority = AlertPriority.high
+
+
+class AlertTestIn(_Strict):
+    priority: AlertPriority = AlertPriority.normal
 
 
 class LegalKind(StrEnum):

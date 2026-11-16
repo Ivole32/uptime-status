@@ -10,11 +10,22 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..alerts import (
+    AlertConfig,
+    PushgateClient,
+    PushgateError,
+    alert_status,
+    get_alert_config,
+    save_alert_config,
+    send_test,
+)
 from ..auth import require_admin
 from ..config import Settings, get_settings
 from ..db import get_db, utcnow
 from ..models import AdminSession, Check, Incident, IncidentUpdate, LegalPage, Monitor, SiteSetting
 from ..schemas import (
+    AlertSettingsIn,
+    AlertTestIn,
     CheckOut,
     IncidentDetailOut,
     IncidentIn,
@@ -286,6 +297,52 @@ def write_settings(body: SiteSettingsIn, db: Session = Depends(get_db)) -> dict:
     db.commit()
     status_cache.invalidate()
     return get_site_settings(db)
+
+
+def _alerts_out(db: Session, settings: Settings) -> dict:
+    cfg = get_alert_config(db)
+    client = PushgateClient.from_settings(settings)
+    return {
+        "enabled": cfg.enabled,
+        "after_minutes": cfg.after_minutes,
+        "on_recovery": cfg.on_recovery,
+        "on_degraded": cfg.on_degraded,
+        "priority": cfg.priority,
+        "pushgate": {
+            "url": settings.pushgate_url,
+            "problem": client.problem(),
+            "last_sent_at": iso_utc(alert_status.last_sent_at),
+            "last_error": alert_status.last_error,
+            "last_error_at": iso_utc(alert_status.last_error_at),
+            "retry_at": iso_utc(alert_status.retry_at),
+        },
+    }
+
+
+@router.get("/alerts")
+def read_alerts(
+    response: Response, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
+) -> dict:
+    _no_store(response)
+    return _alerts_out(db, settings)
+
+
+@router.put("/alerts")
+def write_alerts(
+    body: AlertSettingsIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
+) -> dict:
+    save_alert_config(db, AlertConfig(**{**body.model_dump(), "priority": body.priority.value}))
+    db.commit()
+    return _alerts_out(db, settings)
+
+
+@router.post("/alerts/test")
+def test_alert(body: AlertTestIn, settings: Settings = Depends(get_settings)) -> dict:
+    try:
+        result = send_test(settings, body.priority.value)
+    except PushgateError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    return {"status": result.get("status", "delivered")}
 
 
 def _legal_out(kind: LegalKind, page: LegalPage | None) -> dict:

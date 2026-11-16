@@ -326,3 +326,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
   .sm-only { display: inline; }
   .lg-only { display: none; }
 }
+.alert-state { margin: 0 0 14px; }
+.alert-state.err { color: var(--down); }
+.field small code { font-size: 0.75rem; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }

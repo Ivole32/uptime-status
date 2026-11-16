@@ -98,6 +98,39 @@
     </section>
 
     <section class="section">
+      <div class="section-head"><div><h2>Push alerts</h2><p class="muted">Notifications through <a href="https://github.com/Ivole32/pushgate" target="_blank" rel="noopener">Pushgate</a> when a service stays down longer than you allow. Each monitor can override the delay or turn alerts off.</p></div></div>
+      <form id="alerts-form" class="card settings-card" novalidate>
+        <p class="small" id="alerts-state" aria-live="polite"></p>
+        <div class="form-grid">
+          <div class="field full">
+            <div class="checks"><label class="check"><input type="checkbox" name="enabled"> Send push alerts</label></div>
+          </div>
+          <label class="field"><span>Alert after (minutes)</span><input name="after_minutes" type="number" min="0" max="1440" step="1" required value="5"><small>An outage must last this long before you are alerted. 0 alerts on the first failed check.</small></label>
+          <label class="field"><span>Priority</span>
+            <select name="priority">
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
+            <small>High needs the <code>notifications:send:high</code> scope on the Pushgate key</small>
+          </label>
+          <div class="field full">
+            <span>Also notify</span>
+            <div class="checks">
+              <label class="check"><input type="checkbox" name="on_recovery" checked> When the service is back up</label>
+              <label class="check"><input type="checkbox" name="on_degraded"> On elevated latency (same delay)</label>
+            </div>
+          </div>
+        </div>
+        <p class="error-box" id="alerts-error" role="alert" hidden></p>
+        <div class="form-actions">
+          <button class="btn" type="button" id="alerts-test">Send test alert</button>
+          <button class="btn primary" type="submit">Save alert settings</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="section">
       <div class="section-head"><div><h2>Legal pages</h2><p class="muted">Linked in the footer of the status page. Leave the text empty to take a page offline.</p></div></div>
       <p class="muted small legal-help">Formatting: a blank line starts a new paragraph, <code># Heading</code>, <code>- List item</code>, <code>1. Numbered item</code>, <code>**bold**</code>, <code>[link text](https://example.com)</code> or <code>[email](mailto:mail@example.com)</code>. HTML is shown as plain text.</p>
       <div class="legal-forms">
@@ -153,6 +186,11 @@
             <label class="check"><input type="checkbox" name="show_url"> Show link publicly</label>
           </div>
         </div>
+        <div class="field">
+          <span>Push alerts</span>
+          <div class="checks"><label class="check"><input type="checkbox" name="alerts_enabled" checked> Alert when down</label></div>
+        </div>
+        <label class="field"><span>Alert after (minutes)</span><input name="alert_after_minutes" type="number" min="0" max="1440" step="1" placeholder="Default"><small id="alert-after-hint">Empty uses the default from Settings</small></label>
       </div>
       <p class="error-box" id="monitor-error" role="alert" hidden></p>
       <div class="recent" id="recent-checks" hidden>
