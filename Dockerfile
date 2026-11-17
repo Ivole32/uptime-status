@@ -2,7 +2,7 @@
 # ---- Build stage: install dependencies into an isolated venv ----
 # Base image pinned by digest for reproducible, tamper-evident builds (Dependabot keeps the
 # digest current). Debian 13 "trixie" is the current stable release with full security support.
-FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS build
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /venv
@@ -23,7 +23,7 @@ RUN python -m venv /audit \
  && /audit/bin/pip-audit --strict --path /venv/lib/python3.13/site-packages $PIP_AUDIT_ARGS
 
 # ---- Runtime stage ----
-FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 LABEL org.opencontainers.image.title="uptime-status" \
       org.opencontainers.image.description="Self-hosted uptime status page" \
       org.opencontainers.image.licenses="GPL-3.0"
