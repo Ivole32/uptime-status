@@ -3,4 +3,4 @@
 -r requirements.in
 -r requirements-audit.in
 pytest==9.1.1
-httpx2==2.16.0
+httpx2==2.16.2
